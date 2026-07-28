@@ -1,6 +1,6 @@
 name: orbitnest_studio_flutter
 description: Official Flutter SDK for OrbitNest Studio — auth (MFA, passkeys, SMS), Postgres queries, realtime, storage, and vector search for your backend.
-version: 1.6.2
+version: 1.6.3
 homepage: https://studio.orbitnest.io
 repository: https://github.com/Orbitnest/orbitnest_studio_flutter
 

@@ -1,3 +1,17 @@
+## [1.6.3]
+
+### Fixed
+- **One failing edge function no longer fails every call running beside it.**
+  `OrbitNestFunctions` multiplexes concurrent invocations onto a single bloc and
+  resolves them from its state stream. The success path routed a result to the
+  one pending operation registered for that function name, but the error path
+  completed *every* pending operation with whichever function happened to fail.
+  An app whose dashboard fans out `get-dashboard`, `get-groups`, `get-insights`
+  and one function that had been deleted server-side therefore saw all four
+  reported as broken — each carrying the deleted function's name — even though
+  three of them returned 200. Failures now settle only their own caller.
+  Regression test: `test/functions_error_routing_test.dart`.
+
 ## [1.6.2]
 
 ### Fixed

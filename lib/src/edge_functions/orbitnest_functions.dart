@@ -41,13 +41,14 @@ class OrbitNestFunctions extends ChangeNotifier {
           :final code,
           :final functionName
         ):
-        // Complete all pending operations with the error
+        // Route the failure to the ONE call it belongs to, mirroring the
+        // success path above. Failing every pending operation meant a single
+        // bad function (e.g. one that was deleted server-side and 404s) also
+        // failed every unrelated call in flight beside it, so callers saw
+        // healthy endpoints reported as broken under someone else's name.
         final error =
             FunctionException(message, code: code, functionName: functionName);
-        final pendingKeys = List<String>.from(_pendingOperations.keys);
-        for (final key in pendingKeys) {
-          _completePendingOperationWithError(key, error);
-        }
+        _completePendingOperation(functionName, error, isError: true);
         break;
       case FunctionsInitialState():
         break;
@@ -56,18 +57,31 @@ class OrbitNestFunctions extends ChangeNotifier {
     }
   }
 
-/// Complete the first pending operation whose function name matches.
-  /// Falls back to FIFO if no named match is found (defensive).
-  void _completePendingOperationByName(String functionName, dynamic result) {
+  void _completePendingOperationByName(String functionName, dynamic result) =>
+      _completePendingOperation(functionName, result);
+
+  /// Settle the oldest pending operation registered for [functionName] with
+  /// [result] — as a value, or as an error when [isError] is set.
+  ///
+  /// Falls back to FIFO when the name is unknown (the bloc leaves
+  /// `functionName` null on some failures), which is the best available guess
+  /// and still settles exactly one call rather than all of them.
+  void _completePendingOperation(
+    String? functionName,
+    dynamic result, {
+    bool isError = false,
+  }) {
     if (_pendingOperations.isEmpty) return;
 
     // Find the oldest pending key registered for this function name.
     String? matchKey;
-    for (final entry in _operationFunctionNames.entries) {
-      if (entry.value == functionName &&
-          _pendingOperations.containsKey(entry.key)) {
-        matchKey = entry.key;
-        break;
+    if (functionName != null) {
+      for (final entry in _operationFunctionNames.entries) {
+        if (entry.value == functionName &&
+            _pendingOperations.containsKey(entry.key)) {
+          matchKey = entry.key;
+          break;
+        }
       }
     }
 
@@ -76,21 +90,11 @@ class OrbitNestFunctions extends ChangeNotifier {
 
     _operationFunctionNames.remove(matchKey);
     final completer = _pendingOperations.remove(matchKey);
-    if (completer != null && !completer.isCompleted) {
+    if (completer == null || completer.isCompleted) return;
+    if (isError) {
+      completer.completeError(result as Object);
+    } else {
       completer.complete(result);
-    }
-  }
-
-  void _completePendingOperationWithError(String key, Object error) {
-    // Complete all pending operations with error
-    final completers = Map<String, Completer<dynamic>>.from(_pendingOperations);
-    _pendingOperations.clear();
-    _operationFunctionNames.clear();
-
-    for (final completer in completers.values) {
-      if (!completer.isCompleted) {
-        completer.completeError(error);
-      }
     }
   }
 
