@@ -16,36 +16,15 @@ class AuthInterceptor extends Interceptor {
         return;
       }
 
-      // Client/database endpoints: apikey must always be present for PostgREST,
-      // regardless of whether there is an authenticated user.
-      if (_isClientEndpoint(options.path)) {
-        final apiKey = await _tokenManager.getApiKey();
-        if (apiKey != null) {
-          options.headers['apikey'] = apiKey;
-        }
-
-        final accessToken = await _tokenManager.getAccessToken();
-        if (accessToken != null) {
-          options.headers['Authorization'] = 'Bearer $accessToken';
-        } else if (apiKey != null) {
-          // Unauthenticated client request: anon key serves as the bearer.
-          options.headers['Authorization'] = 'Bearer $apiKey';
-        }
-
-        handler.next(options);
-        return;
-      }
-
-      // Other endpoints: use user access token, fall back to API key
+      // Every other endpoint: the anon key identifies the project (`apikey`);
+      // the Bearer is the user's access token when signed in, else the anon key.
+      final apiKey = await _tokenManager.getApiKey();
+      if (apiKey != null) options.headers['apikey'] = apiKey;
       final token = await _tokenManager.getAccessToken();
       if (token != null) {
         options.headers['Authorization'] = 'Bearer $token';
-      } else {
-        final apiKey = await _tokenManager.getApiKey();
-        if (apiKey != null) {
-          options.headers['apikey'] = apiKey;
-          options.headers['Authorization'] = 'Bearer $apiKey';
-        }
+      } else if (apiKey != null) {
+        options.headers['Authorization'] = 'Bearer $apiKey';
       }
 
       handler.next(options);
@@ -57,108 +36,65 @@ class AuthInterceptor extends Interceptor {
 
   @override
   Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
-    // Handle 401 errors or invalid signature errors
-    if (err.response?.statusCode == 401) {
-      final errorMessage = err.response?.data?.toString() ?? '';
-
-      // If the error is due to invalid signature, try using API key instead
-      if (errorMessage.contains('invalid signature')) {
-        try {
-          final apiKey = await _tokenManager.getApiKey();
-          if (apiKey != null) {
-            err.requestOptions.headers['Authorization'] = 'Bearer $apiKey';
-            err.requestOptions.headers['apikey'] = apiKey;
-
-            // Create a new Dio instance with the same base URL to avoid infinite loops.
-            // Mirror the main client's redirect hardening (http_client.dart) so the
-            // credential headers below are never forwarded to a redirect target host.
-            final dio = Dio(BaseOptions(
-              baseUrl: err.requestOptions.baseUrl,
-              connectTimeout: err.requestOptions.connectTimeout,
-              receiveTimeout: err.requestOptions.receiveTimeout,
-              followRedirects: false,
-              maxRedirects: 0,
-            ));
-
-            final response = await dio.request(
-              err.requestOptions.path,
-              options: Options(
-                method: err.requestOptions.method,
-                headers: err.requestOptions.headers,
-              ),
-              data: err.requestOptions.data,
-              queryParameters: err.requestOptions.queryParameters,
-            );
-
-            handler.resolve(response);
-            return;
-          }
-        } catch (_) {
-          // API key fallback failed — fall through to refresh attempt
-        }
-      }
-
-      // Try to refresh the token
-      try {
-        final refreshed = await _tokenManager.refreshSession();
-        if (refreshed) {
-          // Retry the original request with the refreshed token.
-          // Re-apply both Authorization and apikey so the retry is fully
-          // authenticated — the apikey header must always be present for
-          // PostgREST endpoints even after a token refresh.
-          final token = await _tokenManager.getAccessToken();
-          final apiKey = await _tokenManager.getApiKey();
-          if (token != null) {
-            err.requestOptions.headers['Authorization'] = 'Bearer $token';
-            if (apiKey != null) {
-              err.requestOptions.headers['apikey'] = apiKey;
-            }
-
-            // Create a new Dio instance with the same base URL to avoid infinite loops.
-            // Mirror the main client's redirect hardening (http_client.dart) so the
-            // refreshed bearer + apikey are never forwarded to a redirect target host.
-            final dio = Dio(BaseOptions(
-              baseUrl: err.requestOptions.baseUrl,
-              connectTimeout: err.requestOptions.connectTimeout,
-              receiveTimeout: err.requestOptions.receiveTimeout,
-              followRedirects: false,
-              maxRedirects: 0,
-            ));
-
-            try {
-              final response = await dio.request(
-                err.requestOptions.path,
-                options: Options(
-                  method: err.requestOptions.method,
-                  headers: err.requestOptions.headers,
-                ),
-                data: err.requestOptions.data,
-                queryParameters: err.requestOptions.queryParameters,
-              );
-
-              handler.resolve(response);
-              return;
-            } on DioException catch (retryErr) {
-              // Refresh succeeded but the retried request still 401'd —
-              // the server has decisively rejected this session.
-              if (retryErr.response?.statusCode == 401 ||
-                  retryErr.response?.statusCode == 403) {
-                _tokenManager.notifySessionExpired();
-              }
-              rethrow;
-            }
-          }
-        }
-        // Refresh returned false → refresh-token itself is no longer accepted.
-        _tokenManager.notifySessionExpired();
-      } catch (_) {
-        // Refresh threw — treat as a final 401. notifySessionExpired() is
-        // idempotent so it's safe to call again here.
-        _tokenManager.notifySessionExpired();
-      }
+    // A 401 on analytics is never a session problem (and analytics must not
+    // rotate refresh tokens or log anyone out).
+    // Auth endpoints (sign-in, /auth/refresh itself) are skipped too: a 401
+    // there is a wrong credential, and refreshing from inside the refresh
+    // request would await its own in-flight future forever.
+    if (err.response?.statusCode != 401 ||
+        err.requestOptions.path.contains('/api/analytics/') ||
+        _isAuthEndpoint(err.requestOptions.path)) {
+      handler.next(err);
+      return;
     }
 
-    handler.next(err);
+    // No user session (anonymous caller): a 401 is a plain authorization
+    // error for the caller, not an expired session.
+    final refreshToken = await _tokenManager.getRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      handler.next(err);
+      return;
+    }
+
+    // A concurrent call may already have refreshed: reuse its token instead of
+    // rotating the refresh token again.
+    final sent = err.requestOptions.headers['Authorization'];
+    var token = await _tokenManager.getAccessToken();
+    if (token == null || 'Bearer $token' == sent) {
+      final refreshed = await _tokenManager.refreshSession();
+      if (!refreshed) {
+        // Only a refresh the server rejected ends the session; offline / 5xx
+        // keeps it so the next request can try again.
+        if (!_tokenManager.lastRefreshFailedTransiently) {
+          _tokenManager.notifySessionExpired();
+        }
+        handler.next(err);
+        return;
+      }
+      token = await _tokenManager.getAccessToken();
+    }
+
+    final apiKey = await _tokenManager.getApiKey();
+    if (token == null || 'Bearer $token' == sent) {
+      handler.next(err);
+      return;
+    }
+    err.requestOptions.headers['Authorization'] = 'Bearer $token';
+    if (apiKey != null) err.requestOptions.headers['apikey'] = apiKey;
+
+    // Retry once on a bare Dio (no interceptors → no refresh loop) with the
+    // original options, so responseType (byte downloads), contentType and the
+    // no-redirect hardening carry over. A sent FormData is finalized: clone it.
+    final data = err.requestOptions.data;
+    try {
+      final response = await Dio().fetch<dynamic>(err.requestOptions
+          .copyWith(data: data is FormData ? data.clone() : data));
+      handler.resolve(response);
+    } on DioException catch (retryErr) {
+      // A fresh token that still gets 401/403 means "not allowed", not
+      // "session expired" — surface it to the caller without logging out.
+      handler.next(retryErr);
+    }
   }
 
   bool _isAuthEndpoint(String path) {
@@ -190,16 +126,5 @@ class AuthInterceptor extends Interceptor {
     ];
 
     return authPaths.any((authPath) => path.contains(authPath));
-  }
-
-  /// Check if this is a client endpoint that requires authentication
-  /// These are endpoints like /api/project/:slug/database/*, /api/project/:slug/functions/*, or /api/project/:slug/storage/*
-  bool _isClientEndpoint(String path) {
-    final isClientPath = path.contains('/api/project/') || path.contains('/api/projects/');
-    final isDatabase = path.contains('/database/');
-    final isFunction = path.contains('/functions/');
-    final isStorage = path.contains('/storage/');
-
-    return isClientPath && (isDatabase || isFunction || isStorage);
   }
 }

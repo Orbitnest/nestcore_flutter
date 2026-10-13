@@ -1,6 +1,8 @@
 import '../analytics/orbitnest_analytics.dart';
 import '../analytics/services/analytics_service.dart';
+import 'dart:async';
 import '../auth/bloc/auth_bloc.dart';
+import '../auth/bloc/auth_state.dart';
 import '../auth/repositories/auth_repository.dart';
 import '../auth/services/auth_service.dart';
 import '../auth/services/token_manager.dart';
@@ -54,6 +56,7 @@ class OrbitNestClient {
   late final OrbitNestRealtime _realtime;
   late final OrbitNestAnalytics _analytics;
   late final OrbitNestStorage _storage;
+  late final StreamSubscription<AuthState> _authSubscription;
 
   OrbitNestClient._({
     required String baseUrl,
@@ -160,13 +163,36 @@ class OrbitNestClient {
 
     // Initialize simplified API wrappers
     _auth = OrbitNestAuth(_authBloc, _authService, _tokenManager);
-    _database = OrbitNestDatabase(_databaseBloc, _projectSlug);
+    _database = OrbitNestDatabase(_databaseBloc, _databaseService);
     _functions = OrbitNestFunctions(_functionsBloc);
     _realtime = OrbitNestRealtime(
       baseUrl: _baseUrl,
       projectSlug: _projectSlug,
       apiKey: _anonKey,
+      // Read on every (re)connect so the socket carries the current user.
+      accessTokenProvider: _tokenManager.getAccessToken,
+      // The server refused the socket's token: refresh, then reconnect with it.
+      onAuthRejected: () async {
+        if (await _tokenManager.refreshSession()) await _realtime.reconnect();
+      },
     );
+    // Reconnect realtime when the signed-in user changes so RLS-scoped
+    // subscriptions follow sign-in / sign-out.
+    String? lastUserId;
+    _authSubscription = _authBloc.stream.listen((state) {
+      final String? userId;
+      if (state is AuthAuthenticatedState) {
+        userId = state.user.id;
+      } else if (state is AuthUnauthenticatedState) {
+        userId = null;
+      } else {
+        return;
+      }
+      if (userId != lastUserId) {
+        lastUserId = userId;
+        _realtime.reconnect();
+      }
+    });
     _storage = OrbitNestStorage(
       httpClient: _httpClient,
       baseUrl: _baseUrl,
@@ -202,11 +228,15 @@ class OrbitNestClient {
   /// Convenience shortcut: create a realtime channel directly on the client.
   RealtimeChannel channel(String name) => _realtime.channel(name);
 
-  /// Get the background jobs API (admin only)
+  /// Background jobs live behind the Studio admin API (admin JWT + project
+  /// UUID); an app's anon key or user token always gets 401 here.
+  @Deprecated('Not callable from a client app — every call returns 401. '
+      'Trigger jobs from Studio, the CLI or a server. Will be removed.')
   JobsService get jobs => _jobsService;
 
-  /// Get the migrations API — trigger a server-side migration run and read
-  /// status. The SDK never executes migrations on-device.
+  /// The migration routes this calls do not exist on the API (404).
+  @Deprecated('No such API route — every call fails with 404. Run migrations '
+      'with the OrbitNest CLI or Studio. Will be removed.')
   MigrationService get migrations => _migrationService;
 
   /// Get the analytics API — track events, screens, crashes, and user identity.
@@ -301,7 +331,7 @@ class OrbitNestClient {
   }
 
   /// Execute raw SQL query
-  /// Usage: orbitnest.sql('SELECT * FROM users WHERE status = ?', parameters: ['active'])
+  /// Usage: orbitnest.sql(r'SELECT * FROM users WHERE status = $1', parameters: ['active'])
   Future<List<Map<String, dynamic>>> sql(
     String query, {
     List<dynamic>? parameters,
@@ -371,10 +401,12 @@ class OrbitNestClient {
     _database.dispose();
     _functions.dispose();
     _realtime.dispose();
-    _analyticsService.dispose();
+    _authSubscription.cancel();
     _authBloc.close();
     _databaseBloc.close();
     _functionsBloc.close();
-    _httpClient.close();
+    _tokenManager.dispose();
+    // Flush queued analytics first; the HTTP client closes once that is done.
+    _analyticsService.dispose().whenComplete(_httpClient.close);
   }
 }

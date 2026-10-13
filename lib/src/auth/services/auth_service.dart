@@ -232,6 +232,7 @@ class AuthService {
   Future<UserUpdateResponse> updateUser({
     String? email,
     String? password,
+    String? currentPassword,
     Map<String, dynamic>? data,
   }) async {
     try {
@@ -240,11 +241,34 @@ class AuthService {
         data: {
           if (email != null) 'email': email,
           if (password != null) 'password': password,
+          if (currentPassword != null) 'current_password': currentPassword,
           if (data != null) 'data': data,
         },
       );
 
       return UserUpdateResponse.fromJson(response.data);
+    } catch (e) {
+      throw AuthException.fromException(e);
+    }
+  }
+
+  /// Permanently delete the signed-in user's account.
+  Future<void> deleteUser() async {
+    try {
+      await _httpClient.delete(Endpoints.projectUser(_projectSlug));
+    } catch (e) {
+      throw AuthException.fromException(e);
+    }
+  }
+
+  /// Confirm a pending email change with the code sent to the new address.
+  Future<Map<String, dynamic>> verifyEmailChange(String code) async {
+    try {
+      final response = await _httpClient.post(
+        Endpoints.projectVerifyEmailChange(_projectSlug),
+        data: {'code': code},
+      );
+      return Map<String, dynamic>.from(response.data as Map);
     } catch (e) {
       throw AuthException.fromException(e);
     }
@@ -501,11 +525,14 @@ class AuthService {
   // ─── MFA (TOTP / authenticator apps) ───
 
   /// Begin TOTP enrollment — returns `secret`, `otpauth_url`, `qr_code`, `factor_id`.
-  Future<Map<String, dynamic>> enrollMfaTotp({String? friendlyName}) async {
+  Future<Map<String, dynamic>> enrollMfaTotp({String? friendlyName, String? code}) async {
     try {
       final response = await _httpClient.post(
         Endpoints.projectMfaEnroll(_projectSlug),
-        data: {if (friendlyName != null) 'friendly_name': friendlyName},
+        data: {
+          if (friendlyName != null) 'friendly_name': friendlyName,
+          if (code != null) 'code': code,
+        },
       );
       return Map<String, dynamic>.from(response.data as Map);
     } catch (e) {
@@ -530,10 +557,11 @@ class AuthService {
   }
 
   /// Regenerate the user's MFA recovery codes. Returns `{ codes: [...] }` once.
-  Future<Map<String, dynamic>> regenerateMfaRecoveryCodes() async {
+  Future<Map<String, dynamic>> regenerateMfaRecoveryCodes({String? code}) async {
     try {
       final response = await _httpClient.post(
         Endpoints.projectMfaRecoveryCodes(_projectSlug),
+        data: {if (code != null) 'code': code},
       );
       return Map<String, dynamic>.from(response.data as Map);
     } catch (e) {
@@ -554,10 +582,11 @@ class AuthService {
   }
 
   /// Remove an MFA factor.
-  Future<void> unenrollMfa({required String factorId}) async {
+  Future<void> unenrollMfa({required String factorId, String? code}) async {
     try {
       await _httpClient.delete(
         Endpoints.projectMfaFactor(_projectSlug, factorId),
+        data: {if (code != null) 'code': code},
       );
     } catch (e) {
       throw AuthException.fromException(e);

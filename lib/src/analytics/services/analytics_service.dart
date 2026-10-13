@@ -42,9 +42,11 @@ class AnalyticsService {
   }
 
   void crash(Object error, {StackTrace? stackTrace, Map<String, dynamic>? properties}) {
+    // Field names the server's crash grouping reads.
     _enqueue('crash', properties: {
-      'error': error.toString(),
-      if (stackTrace != null) 'stack': stackTrace.toString(),
+      'error_type': error.runtimeType.toString(),
+      'error_message': error.toString(),
+      if (stackTrace != null) 'stack_trace': stackTrace.toString(),
       ...?properties,
     });
   }
@@ -92,8 +94,6 @@ class AnalyticsService {
     }
   }
 
-  void dispose() {
-    _flushTimer?.cancel();
-    _flushTimer = null;
-  }
+  /// Sends any queued events, then stops the flush timer.
+  Future<void> dispose() => flush();
 }

@@ -7,6 +7,7 @@ class DatabaseException extends OrbitNestException {
     super.message, {
     super.code,
     super.statusCode,
+    super.body,
     this.table,
     this.query,
     this.hint,
@@ -28,6 +29,7 @@ class DatabaseException extends OrbitNestException {
         error.message,
         code: error.code,
         statusCode: error.statusCode,
+        body: error.body,
       );
     }
 
@@ -41,6 +43,7 @@ class DatabaseException extends OrbitNestException {
           inner.message,
           code: inner.code,
           statusCode: inner.statusCode ?? error.response?.statusCode,
+          body: inner.body,
         );
       }
       final msg = error.message ?? error.toString();

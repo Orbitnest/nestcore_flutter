@@ -46,10 +46,10 @@ class OrbitNestAuth extends ChangeNotifier {
     // Complete pending operations based on state changes
     switch (state) {
       case AuthAuthenticatedState(:final user, :final session):
-        _completePendingOperation('auth_success', {
-          'user': user.toJson(),
-          'session': session.toJson(),
-        });
+        final result = {'user': user.toJson(), 'session': session.toJson()};
+        for (final key in const ['auth_success', 'refresh', 'get_user']) {
+          _completePendingOperation(key, result);
+        }
         break;
       case AuthOtpSentState(:final email, :final message, :final type):
         _completePendingOperation('otp_sent', {
@@ -72,6 +72,11 @@ class OrbitNestAuth extends ChangeNotifier {
         break;
       case AuthUnauthenticatedState():
         _completePendingOperation('unauthenticated', null);
+        // refreshSession()/getUser() would otherwise wait forever.
+        const notSignedIn = AuthException('Not signed in or session expired',
+            code: 'UNAUTHENTICATED', statusCode: 401);
+        _completePendingOperationWithError('refresh', notSignedIn);
+        _completePendingOperationWithError('get_user', notSignedIn);
         break;
       case AuthMfaRequiredState(:final challengeToken, :final factors):
         // Resolve the pending signInWithPassword with the challenge instead of
@@ -275,15 +280,15 @@ class OrbitNestAuth extends ChangeNotifier {
     );
   }
 
-  /// Reset password with token from email
-  /// Returns user and session when successful
+  /// Reset password with the code from the recovery email.
+  /// Returns `{email, message}`; the user then signs in with the new password.
   Future<Map<String, dynamic>> resetPassword({
     required String email,
     required String token,
     required String newPassword,
   }) async {
     return await _executeWithCompleter<Map<String, dynamic>>(
-      'auth_success',
+      'password_reset_sent',
       AuthUpdatePasswordEvent(
         email: email,
         token: token,
@@ -292,24 +297,60 @@ class OrbitNestAuth extends ChangeNotifier {
     );
   }
 
-  /// Update current user profile
+  /// Update current user profile.
+  /// Changing [email] or [password] requires [currentPassword] (accounts
+  /// without a password instead need a session less than 10 minutes old);
+  /// otherwise the server answers 401 `REAUTH_REQUIRED`.
   /// Returns updated user when successful
   Future<Map<String, dynamic>> updateUser({
     String? email,
     String? password,
+    String? currentPassword,
     Map<String, dynamic>? metadata,
   }) async {
     return await _executeWithCompleter<Map<String, dynamic>>(
       'user_updated',
-      AuthUpdateUserEvent(email: email, password: password, data: metadata),
+      AuthUpdateUserEvent(
+        email: email,
+        password: password,
+        currentPassword: currentPassword,
+        data: metadata,
+      ),
     );
   }
 
-  /// Refresh current session
-  /// Returns user and session when successful
+  /// Apply a pending email change (requested with [updateUser]) using the code
+  /// sent to the new address. The access token keeps the old `email` claim
+  /// until the next refresh.
+  Future<Map<String, dynamic>> verifyEmailChange(String code) async {
+    try {
+      return await _authService.verifyEmailChange(code);
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      throw AuthException.fromException(e);
+    }
+  }
+
+  /// Permanently delete the signed-in user's account, then clear the local
+  /// session (auth state becomes unauthenticated).
+  Future<void> deleteUser() async {
+    try {
+      await _authService.deleteUser();
+    } catch (e) {
+      if (e is AuthException) rethrow;
+      throw AuthException.fromException(e);
+    }
+    await _tokenManager.clearSession();
+    _authBloc.add(const AuthInitializeEvent()); // no stored session → unauthenticated
+  }
+
+  /// Refresh current session.
+  /// Returns user and session when successful. Throws [AuthException] when the
+  /// session is gone (`UNAUTHENTICATED`) or the server could not be reached
+  /// (`REFRESH_FAILED` — the stored session is kept).
   Future<Map<String, dynamic>> refreshSession() async {
     final result = await _executeWithCompleter<Map<String, dynamic>>(
-      'auth_success',
+      'refresh',
       const AuthRefreshSessionEvent(),
     );
     // Update this TokenManager's in-memory cache directly after a successful
@@ -344,11 +385,11 @@ class OrbitNestAuth extends ChangeNotifier {
 
     // Trigger getUser event and wait for result
     final result = await _executeWithCompleter<Map<String, dynamic>>(
-      'auth_success',
+      'get_user',
       const AuthGetUserEvent(),
     );
 
-    return result['user'] as User;
+    return User.fromJson(Map<String, dynamic>.from(result['user'] as Map));
   }
 
   // ── Passkey / WebAuthn ────────────────────────────────────────────────────
@@ -447,6 +488,7 @@ class OrbitNestAuth extends ChangeNotifier {
   // ─── SMS OTP (phone sign-in; project must have Twilio configured) ───
 
   /// Send a one-time code to a phone number (E.164, e.g. `+15555550123`).
+  /// Rate limited per phone: `AuthException` code `SMS_RATE_LIMITED` (429).
   Future<Map<String, dynamic>> signInWithSms(String phone) async {
     try {
       return await _authService.signInWithSms(phone: phone);
@@ -457,27 +499,26 @@ class OrbitNestAuth extends ChangeNotifier {
   }
 
   /// Verify a phone OTP and sign in (creates the user on first sign-in).
-  /// Stores the resulting session.
+  /// Returns `{user, session}` and updates auth state like a password sign-in.
+  /// Too many attempts → `AuthException` with code `OTP_RATE_LIMITED` (429).
   Future<Map<String, dynamic>> verifySmsOtp({
     required String phone,
     required String code,
   }) async {
-    try {
-      final res = await _authService.verifySmsOtp(phone: phone, code: code);
-      if (res.session != null) await _tokenManager.storeSession(res.session!);
-      return {'user': res.user?.toJson(), 'session': res.session?.toJson()};
-    } catch (e) {
-      if (e is AuthException) rethrow;
-      throw AuthException.fromException(e);
-    }
+    return await _executeWithCompleter<Map<String, dynamic>>(
+      'auth_success',
+      AuthVerifySmsOtpEvent(phone: phone, code: code),
+    );
   }
 
   // ─── MFA (TOTP / authenticator apps) ───
 
   /// Begin TOTP enrollment — returns `secret`, `otpauth_url`, `qr_code`, `factor_id`.
-  Future<Map<String, dynamic>> enrollMfaTotp({String? friendlyName}) async {
+  /// When the user already has a verified factor, pass a current TOTP or
+  /// recovery [code] (server answers 401 `MFA_REAUTH_REQUIRED` otherwise).
+  Future<Map<String, dynamic>> enrollMfaTotp({String? friendlyName, String? code}) async {
     try {
-      return await _authService.enrollMfaTotp(friendlyName: friendlyName);
+      return await _authService.enrollMfaTotp(friendlyName: friendlyName, code: code);
     } catch (e) {
       if (e is AuthException) rethrow;
       throw AuthException.fromException(e);
@@ -499,9 +540,10 @@ class OrbitNestAuth extends ChangeNotifier {
   }
 
   /// Regenerate the user's MFA recovery codes. Returns `{ codes: [...] }` once.
-  Future<Map<String, dynamic>> regenerateMfaRecoveryCodes() async {
+  /// Requires a current TOTP or recovery [code] when MFA is active.
+  Future<Map<String, dynamic>> regenerateMfaRecoveryCodes({String? code}) async {
     try {
-      return await _authService.regenerateMfaRecoveryCodes();
+      return await _authService.regenerateMfaRecoveryCodes(code: code);
     } catch (e) {
       if (e is AuthException) rethrow;
       throw AuthException.fromException(e);
@@ -518,10 +560,11 @@ class OrbitNestAuth extends ChangeNotifier {
     }
   }
 
-  /// Remove an MFA factor.
-  Future<void> unenrollMfa({required String factorId}) async {
+  /// Remove an MFA factor. Requires a current TOTP or recovery [code] when
+  /// the user has a verified factor.
+  Future<void> unenrollMfa({required String factorId, String? code}) async {
     try {
-      await _authService.unenrollMfa(factorId: factorId);
+      await _authService.unenrollMfa(factorId: factorId, code: code);
     } catch (e) {
       if (e is AuthException) rethrow;
       throw AuthException.fromException(e);

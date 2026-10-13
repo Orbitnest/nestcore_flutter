@@ -117,6 +117,18 @@ class AuthRepository {
     }
   }
 
+  /// Verify a phone OTP and sign in.
+  Future<AuthResponse> verifySmsOtp({
+    required String phone,
+    required String code,
+  }) async {
+    try {
+      return await _authService.verifySmsOtp(phone: phone, code: code);
+    } catch (e) {
+      throw AuthException.fromException(e);
+    }
+  }
+
   /// Sign out the current user
   Future<void> signOut() async {
     try {
@@ -154,12 +166,14 @@ class AuthRepository {
   Future<UserUpdateResponse> updateUser({
     String? email,
     String? password,
+    String? currentPassword,
     Map<String, dynamic>? data,
   }) async {
     try {
       return await _authService.updateUser(
         email: email,
         password: password,
+        currentPassword: currentPassword,
         data: data,
       );
     } catch (e) {

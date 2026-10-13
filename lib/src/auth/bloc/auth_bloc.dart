@@ -32,6 +32,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthSignUpEvent>(_onSignUp);
     on<AuthSignInWithPasswordEvent>(_onSignInWithPassword);
     on<AuthVerifyMfaEvent>(_onVerifyMfa);
+    on<AuthVerifySmsOtpEvent>(_onVerifySmsOtp);
     on<AuthSignOutEvent>(_onSignOut);
     on<AuthRefreshSessionEvent>(_onRefreshSession);
     on<AuthUpdateUserEvent>(_onUpdateUser);
@@ -55,13 +56,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   /// Perform token refresh for token manager callback
+  ///
+  /// Returns false only when there is no refresh token or the server rejected
+  /// it (4xx). Network errors, timeouts, 408/429 and 5xx are rethrown so the
+  /// TokenManager reports them as transient and the stored session is kept.
   Future<bool> _performTokenRefresh() async {
-    try {
-      final refreshToken = await _tokenManager.getRefreshToken();
-      if (refreshToken == null) {
-        return false;
-      }
+    final refreshToken = await _tokenManager.getRefreshToken();
+    if (refreshToken == null) {
+      return false;
+    }
 
+    try {
       final response = await _authRepository.refreshSession(
         refreshToken: refreshToken,
       );
@@ -72,8 +77,12 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       }
 
       return false;
-    } catch (e) {
-      return false;
+    } on AuthException catch (e) {
+      final status = e.statusCode;
+      if (status != null && status >= 400 && status < 500 && status != 408 && status != 429) {
+        return false;
+      }
+      rethrow;
     }
   }
 
@@ -323,6 +332,37 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+  Future<void> _onVerifySmsOtp(
+    AuthVerifySmsOtpEvent event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(const AuthLoadingState());
+
+    try {
+      final response = await _authRepository.verifySmsOtp(
+        phone: event.phone,
+        code: event.code,
+      );
+
+      if (response.isAuthenticated) {
+        await _tokenManager.storeSession(response.session!);
+        emit(
+          AuthAuthenticatedState(
+            user: response.user!,
+            session: response.session!,
+          ),
+        );
+      } else {
+        emit(AuthErrorState(
+            message: response.message ?? 'SMS verification failed'));
+      }
+    } catch (e) {
+      emit(
+        AuthErrorState(message: _getErrorMessage(e), code: _getErrorCode(e)),
+      );
+    }
+  }
+
   Future<void> _onSignOut(
     AuthSignOutEvent event,
     Emitter<AuthState> emit,
@@ -350,6 +390,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthRefreshSessionEvent event,
     Emitter<AuthState> emit,
   ) async {
+    // Bloc drops a state equal to the current one; without this an explicit
+    // refresh that ends Unauthenticated while already Unauthenticated would
+    // never notify the waiting caller.
+    if (!event.silent) emit(const AuthLoadingState());
     try {
       final refreshToken =
           event.refreshToken ?? await _tokenManager.getRefreshToken();
@@ -382,11 +426,26 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         }
       }
 
+      if (_tokenManager.lastRefreshFailedTransiently) {
+        // Offline / timeout / 5xx: the refresh token may still be valid, so
+        // keep the stored session — the next request retries the refresh.
+        if (!event.silent) {
+          emit(const AuthErrorState(
+            message: 'Could not refresh the session: network or server unavailable',
+            code: 'REFRESH_FAILED',
+          ));
+        }
+        return;
+      }
+
+      // The server rejected the refresh token: the session is really over.
       await _tokenManager.clearSession();
       emit(const AuthUnauthenticatedState());
     } catch (e) {
-      await _tokenManager.clearSession();
-      emit(const AuthUnauthenticatedState());
+      // Unexpected local failure — never wipe the stored session for it.
+      if (!event.silent) {
+        emit(AuthErrorState(message: _getErrorMessage(e), code: _getErrorCode(e)));
+      }
     }
   }
 
@@ -400,6 +459,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final response = await _authRepository.updateUser(
         email: event.email,
         password: event.password,
+        currentPassword: event.currentPassword,
         data: event.data,
       );
 
@@ -446,6 +506,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthGetUserEvent event,
     Emitter<AuthState> emit,
   ) async {
+    emit(const AuthLoadingState()); // see _onRefreshSession
     try {
       final user = await _authRepository.getUser();
       final session = await _tokenManager.getStoredSession();
@@ -499,22 +560,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         password: event.password,
       );
 
-      if (response.isAuthenticated) {
-        await _tokenManager.storeSession(response.session!);
-        emit(
-          AuthAuthenticatedState(
-            user: response.user!,
-            session: response.session!,
-          ),
-        );
-      } else {
-        emit(
-          AuthUserUpdatedState(
-            user: response.user!,
-            message: response.message ?? 'Password updated successfully',
-          ),
-        );
-      }
+      // The API answers {success, message} with no user or session — the user
+      // signs in again with the new password.
+      emit(
+        AuthPasswordResetSentState(
+          email: event.email,
+          message: response.message ?? 'Password has been reset',
+        ),
+      );
     } catch (e) {
       emit(
         AuthErrorState(message: _getErrorMessage(e), code: _getErrorCode(e)),
@@ -547,7 +600,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         // init. The AuthInterceptor handles 401→refresh→retry on any API call,
         // so callers are unblocked even though the token is stale.
         emit(AuthAuthenticatedState(user: session.user, session: session));
-        add(AuthRefreshSessionEvent(refreshToken: session.refreshToken));
+        add(AuthRefreshSessionEvent(
+            refreshToken: session.refreshToken, silent: true));
         return;
       }
 

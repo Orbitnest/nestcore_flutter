@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import '../auth/services/token_manager.dart';
+import '../constants/constants.dart';
 import '../utils/env_config.dart';
 import 'interceptors/auth_interceptor.dart';
 import 'interceptors/error_interceptor.dart';
@@ -28,7 +29,7 @@ class OrbitNestHttpClient {
         'Accept': 'application/json',
         // Security headers
         'X-Requested-With': 'XMLHttpRequest',
-        'X-Client-Info': 'orbitnest-flutter/1.0.8',
+        'X-Client-Info': 'orbitnest-flutter/${OrbitNestConstants.version}',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',

@@ -13,7 +13,7 @@ class DatabaseRepository {
   }) : _databaseService = databaseService;
 
   /// Execute raw SQL query
-  Future<List<Map<String, dynamic>>> executeSql({
+  Future<PostgrestResponse<Map<String, dynamic>>> executeSql({
     required String sql,
     List<dynamic>? parameters,
   }) async {
@@ -113,131 +113,67 @@ class DatabaseRepository {
   /// Execute a query (used by PostgrestQueryBuilder)
   Future<PostgrestResponse<Map<String, dynamic>>> executeQuery({
     required String table,
-    required String select,
+    String select = '*',
     List<String>? filters,
-    List<String>? orders,
+    String? orderBy,
+    bool ascending = true,
     int? limit,
     int? offset,
-  }) async {
-    try {
-      return await _databaseService.executeQuery(
+  }) =>
+      _databaseService.executeQuery(
         table: table,
         select: select,
         filters: filters,
-        orders: orders,
+        orderBy: orderBy,
+        ascending: ascending,
         limit: limit,
         offset: offset,
       );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
 
   /// Insert data
   Future<PostgrestResponse<Map<String, dynamic>>> insert({
     required String table,
     required Map<String, dynamic> values,
     bool upsert = false,
-    String? onConflict,
-    bool ignoreDuplicates = false,
-  }) async {
-    try {
-      return await _databaseService.insert(
-        table: table,
-        values: values,
-        upsert: upsert,
-        onConflict: onConflict,
-        ignoreDuplicates: ignoreDuplicates,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+  }) =>
+      _databaseService.insert(table: table, values: values, upsert: upsert);
 
-  /// Update data
+  /// Update rows matching [match] (column = value, AND-ed)
   Future<PostgrestResponse<Map<String, dynamic>>> update({
     required String table,
     required Map<String, dynamic> values,
-    List<String>? filters,
-  }) async {
-    try {
-      return await _databaseService.update(
-        table: table,
-        values: values,
-        filters: filters,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+    required Map<String, dynamic> match,
+  }) =>
+      _databaseService.updateWhere(table: table, values: values, match: match);
 
-  /// Delete data
+  /// Delete rows matching [match] (column = value, AND-ed)
   Future<PostgrestResponse<Map<String, dynamic>>> delete({
     required String table,
-    List<String>? filters,
-  }) async {
-    try {
-      return await _databaseService.delete(
-        table: table,
-        filters: filters,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+    required Map<String, dynamic> match,
+  }) =>
+      _databaseService.deleteWhere(table: table, match: match);
 
-  /// Bulk insert
-  Future<int> bulkInsert({
+  /// Bulk insert (one request per row)
+  Future<PostgrestResponse<Map<String, dynamic>>> bulkInsert({
     required String table,
     required List<Map<String, dynamic>> values,
-    bool upsert = false,
-    String? onConflict,
-    bool ignoreDuplicates = false,
-  }) async {
-    try {
-      return await _databaseService.bulkInsert(
-        table: table,
-        values: values,
-        upsert: upsert,
-        onConflict: onConflict,
-        ignoreDuplicates: ignoreDuplicates,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+  }) =>
+      _databaseService.bulkInsert(table: table, values: values);
 
-  /// Bulk update
+  /// Bulk update by explicit match column
   Future<int> bulkUpdate({
     required String table,
     required List<Map<String, dynamic>> values,
     required String matchColumn,
-  }) async {
-    try {
-      return await _databaseService.bulkUpdate(
-        table: table,
-        values: values,
-        matchColumn: matchColumn,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+  }) =>
+      _databaseService.bulkUpdate(
+          table: table, values: values, matchColumn: matchColumn);
 
-  /// Bulk delete
+  /// Bulk delete by explicit ids
   Future<int> bulkDelete({
     required String table,
     required List<dynamic> ids,
     String idColumn = 'id',
-  }) async {
-    try {
-      return await _databaseService.bulkDelete(
-        table: table,
-        ids: ids,
-        idColumn: idColumn,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
+  }) =>
+      _databaseService.bulkDelete(table: table, ids: ids, idColumn: idColumn);
 }

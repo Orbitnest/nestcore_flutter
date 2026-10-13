@@ -1,3 +1,114 @@
+## [1.7.0]
+
+### Fixed — Database
+- **`deleteMany` no longer deletes unrelated rows.** It sent the filter
+  *values* as ids (`deleteMany('posts', filters: {'author_id': 12})` ran
+  `DELETE … WHERE id = 12`). `delete`/`deleteMany` now delete the rows whose
+  columns equal **all** filters, and `count` is the real number of rows deleted.
+- **`updateMany` respects its filters** (it ignored them and matched on
+  `values['id']`). `update`/`updateMany` update every row matching all filters
+  and report the real row count.
+- **`from(table)` works.** `execute()`, `insert()`, `update()` and `delete()`
+  threw `UnsupportedError`. The builder now calls the API directly.
+- **`select()` filters, ordering, paging and columns are honoured.** They were
+  sent in PostgREST syntax the API ignores, so every call returned the first
+  page of the whole table. Filters now go as `filter=column:operator:value`,
+  ordering as `sortBy`/`sortOrder`, paging as `limit` or `from`/`to`; columns
+  are projected client-side.
+- **Unsupported query features throw instead of returning wrong rows.**
+  `contains`, `containedBy`, `overlaps`, `range*`, `textSearch`, `or`, `and`,
+  `isNotNull`, more than one `order`, aliased/embedded selects, and `inFilter`
+  values containing `,` throw `UnsupportedError`/`ArgumentError` before any
+  request. Filter values may contain `:` (timestamps, URLs). `update()`/`delete()` on the builder accept equality filters only and
+  refuse to run without a filter.
+- **`sql()` works.** It sent `parameters` (the API field is `params`, so every
+  parameterised query got 400) and returned the response envelope as a single
+  row. It now returns the rows, with `count` = rows affected. `vectorSearch()`
+  works again as a result.
+- **Concurrent `database.*` calls no longer hang or swap results.** Calls
+  were multiplexed through one bloc and settled the first waiting caller.
+  Each call now returns its own future.
+- **`insertMany()` no longer hits the service-role-only bulk route** (401). It
+  inserts one row per request (not atomic) and returns the inserted rows.
+- **Upsert throws `UnsupportedError`** instead of silently doing a plain
+  insert. `insert(upsert: true)`, `from().upsert()` and
+  `from().insert([...])` used to drop all but the first row; a list now
+  inserts every row.
+
+### Fixed — Auth & sessions
+- **`OrbitNestClient.create(anonKey:)` works without a `.env` asset.** It
+  crashed with `NotInitializedError` from flutter_dotenv.
+- **An offline cold start no longer logs the user out.** A refresh that fails
+  because of the network, a timeout, 408/429 or 5xx keeps the stored session
+  and is retried on the next request. Only a refresh the server rejects (4xx)
+  clears it.
+- **Ordinary 401s no longer fire `onSessionExpired`.** An anonymous caller's
+  401, a 401/403 on a retried request, a transient refresh failure, and any
+  401 from analytics are returned to the caller instead of signalling "session
+  expired". `onSessionExpired` fires only when the server rejects the refresh
+  token.
+- **No more silent downgrade to the anon key.** A 401 "invalid signature" was
+  replayed with the anon key and reported as success.
+- **Analytics sends the `apikey` header** with every request, and its 401s no
+  longer trigger refresh-token rotation or logout.
+- **`resetPassword()` no longer throws after the password was reset.** It
+  returns `{email, message}`; the user signs in with the new password.
+- **`verifySmsOtp()` updates auth state** (`isAuthenticated`, `currentUser`,
+  `onAuthStateChange`), like a password sign-in.
+- **`getUser()` returns a `User`** (it cast a `Map` to `User`) and throws
+  instead of hanging when no user is signed in.
+- **`refreshSession()` throws instead of hanging** when the refresh fails.
+- **Requests made while a token refresh is running wait for it** instead of
+  going out with the anon key (RLS saw no user); a refresh that fails offline
+  keeps sending the user token. The 401 refresh-and-retry now keeps byte
+  downloads and uploads working, and reuses a token another call already
+  refreshed. Realtime refreshes once and reconnects when the server rejects
+  the socket's token (close 4001).
+
+### Added
+- `updateUser(currentPassword:)` — the API now requires the current password
+  to change the email or password.
+- **`auth.verifyEmailChange(code)`.** Changing the email with `updateUser(email:, currentPassword:)` now only sends a code to the new address; call this with that code to apply the change.
+- `code` on `enrollMfaTotp`, `regenerateMfaRecoveryCodes` and `unenrollMfa`
+  — the API requires a current TOTP/recovery code once MFA is active.
+- `auth.deleteUser()` — deletes the signed-in user's account and clears the
+  local session.
+- `realtime.reconnect()`.
+
+### Fixed — Realtime
+- The socket carries the signed-in user's access token and reconnects on
+  sign-in/sign-out, so RLS-scoped subscriptions see that user's rows.
+- `unsubscribe()` removes the server subscriptions (it sent the bare channel
+  name, which matched nothing). `untrack()` sends the gateway's
+  `presence.untrack`, so it drops presence without leaving the channel.
+- Reconnect backoff now grows while the server is down (it reset to ~1 s).
+- Server `error` frames reach `channel.events` as `RealtimeErrorEvent`, and a
+  channel's `events` stream only carries its own tables' changes.
+
+### Fixed — Errors
+- API error codes and structured fields reach callers. `OrbitNestException`
+  (and `AuthException`/`DatabaseException`/`FunctionException`) has a new
+  `body` with the parsed error JSON, e.g. `QUOTA_EXCEEDED`'s
+  `quota`/`plan`/`limit`/`usage`. `FunctionException` now keeps the API's
+  `code` and `message` (it reported `UNKNOWN_FUNCTION_ERROR`).
+- 402/403/429 (`QUOTA_EXCEEDED`, `PLAN_REQUIRED`, `MFA_ENROLLMENT_REQUIRED`,
+  `SMS_RATE_LIMITED`, `SHARED_EMAIL_RATE_LIMITED`, …) never refresh or end the
+  session. A 429 that carries a `code` is not retried.
+
+### Fixed — Other
+- `crash()` sends `error_type`, `error_message` and `stack_trace`, so crashes
+  group by type.
+- `dispose()` flushes queued analytics and closes the session-expired stream.
+- Uploads are not retried with an already-sent `FormData` body.
+- NestJS validation errors (`message` as a list) no longer crash the error
+  interceptor.
+- `X-Client-Info` reports the real SDK version.
+
+### Deprecated
+- `orbitnest.jobs` (needs the Studio admin API, always 401 from an app) and
+  `orbitnest.migrations` (the routes do not exist). Use Studio or the
+  OrbitNest CLI. They will be removed.
+
 ## [1.6.3]
 
 ### Fixed

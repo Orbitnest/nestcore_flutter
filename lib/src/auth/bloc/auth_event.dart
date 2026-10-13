@@ -80,6 +80,16 @@ class AuthVerifyMfaEvent extends AuthEvent {
 }
 
 // Session management
+class AuthVerifySmsOtpEvent extends AuthEvent {
+  const AuthVerifySmsOtpEvent({
+    required this.phone,
+    required this.code,
+  });
+
+  final String phone;
+  final String code;
+}
+
 class AuthSignOutEvent extends AuthEvent {
   const AuthSignOutEvent();
 }
@@ -87,9 +97,14 @@ class AuthSignOutEvent extends AuthEvent {
 class AuthRefreshSessionEvent extends AuthEvent {
   const AuthRefreshSessionEvent({
     this.refreshToken,
+    this.silent = false,
   });
 
   final String? refreshToken;
+
+  /// When true (cold-start refresh), a network failure emits nothing; the
+  /// stored session is kept either way and refresh is retried on next use.
+  final bool silent;
 }
 
 // User management
@@ -97,11 +112,15 @@ class AuthUpdateUserEvent extends AuthEvent {
   const AuthUpdateUserEvent({
     this.email,
     this.password,
+    this.currentPassword,
     this.data,
   });
 
   final String? email;
   final String? password;
+
+  /// Required by the server when changing [email] or [password].
+  final String? currentPassword;
   final Map<String, dynamic>? data;
 }
 

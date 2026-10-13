@@ -89,68 +89,35 @@ class ErrorInterceptor extends Interceptor {
     String? code;
 
     if (data is Map<String, dynamic>) {
-      message = data['message'] ?? data['error'] ?? message;
+      // NestJS validation errors send `message` as a list of strings.
+      final m = data['message'] ?? data['error'];
+      if (m is List) {
+        message = m.join(', ');
+      } else if (m != null) {
+        message = m.toString();
+      }
       code = data['code']?.toString();
     } else if (data is String) {
       message = data;
     }
 
-    switch (statusCode) {
-      case 400:
-        return OrbitNestException(
-          message.isEmpty ? 'Bad Request' : message,
-          code: code ?? ErrorCodes.badRequest,
-          statusCode: statusCode,
-        );
-      case 401:
-        return OrbitNestException(
-          message.isEmpty ? 'Unauthorized' : message,
-          code: code ?? ErrorCodes.unauthorized,
-          statusCode: statusCode,
-        );
-      case 403:
-        return OrbitNestException(
-          message.isEmpty ? 'Forbidden' : message,
-          code: code ?? ErrorCodes.forbidden,
-          statusCode: statusCode,
-        );
-      case 404:
-        return OrbitNestException(
-          message.isEmpty ? 'Not Found' : message,
-          code: code ?? ErrorCodes.notFound,
-          statusCode: statusCode,
-        );
-      case 429:
-        return OrbitNestException(
-          message.isEmpty ? 'Too Many Requests' : message,
-          code: code ?? ErrorCodes.rateLimitExceeded,
-          statusCode: statusCode,
-        );
-      case 500:
-        return OrbitNestException(
-          message.isEmpty ? 'Internal Server Error' : message,
-          code: code ?? ErrorCodes.internalServerError,
-          statusCode: statusCode,
-        );
-      case 502:
-        return OrbitNestException(
-          message.isEmpty ? 'Bad Gateway' : message,
-          code: code ?? ErrorCodes.badGateway,
-          statusCode: statusCode,
-        );
-      case 503:
-        return OrbitNestException(
-          message.isEmpty ? 'Service Unavailable' : message,
-          code: code ?? ErrorCodes.serviceUnavailable,
-          statusCode: statusCode,
-        );
-      default:
-        return OrbitNestException(
-          message.isEmpty ? 'HTTP Error $statusCode' : message,
-          code: code ?? ErrorCodes.httpError,
-          statusCode: statusCode,
-        );
-    }
+    final (fallback, defaultCode) = switch (statusCode) {
+      400 => ('Bad Request', ErrorCodes.badRequest),
+      401 => ('Unauthorized', ErrorCodes.unauthorized),
+      403 => ('Forbidden', ErrorCodes.forbidden),
+      404 => ('Not Found', ErrorCodes.notFound),
+      429 => ('Too Many Requests', ErrorCodes.rateLimitExceeded),
+      500 => ('Internal Server Error', ErrorCodes.internalServerError),
+      502 => ('Bad Gateway', ErrorCodes.badGateway),
+      503 => ('Service Unavailable', ErrorCodes.serviceUnavailable),
+      _ => ('HTTP Error $statusCode', ErrorCodes.httpError),
+    };
+    return OrbitNestException(
+      message.isEmpty ? fallback : message,
+      code: code ?? defaultCode,
+      statusCode: statusCode,
+      body: data is Map<String, dynamic> ? data : null,
+    );
   }
 }
 
@@ -160,11 +127,16 @@ class OrbitNestException implements Exception {
     this.message, {
     this.code,
     this.statusCode,
+    this.body,
   });
 
   final String message;
   final String? code;
   final int? statusCode;
+
+  /// Parsed JSON error body, with any structured fields the API sent
+  /// (e.g. `QUOTA_EXCEEDED`'s `quota`/`plan`/`limit`/`usage`).
+  final Map<String, dynamic>? body;
 
   @override
   String toString() {

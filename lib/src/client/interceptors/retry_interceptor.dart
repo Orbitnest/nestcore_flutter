@@ -78,6 +78,11 @@ class RetryInterceptor extends Interceptor {
       return false;
     }
 
+    // A FormData body is finalized by the first send and cannot be re-sent.
+    if (error.requestOptions.data is FormData) {
+      return false;
+    }
+
     // Retry on timeout errors
     if (retryPolicy.retryOnTimeout &&
         (error.type == DioExceptionType.connectionTimeout ||
@@ -95,6 +100,12 @@ class RetryInterceptor extends Interceptor {
 
     // Retry on specific status codes
     final statusCode = error.response?.statusCode;
+    // A coded 429 (SMS_RATE_LIMITED, SHARED_EMAIL_RATE_LIMITED, …) is a
+    // minutes-to-hours window; retrying within seconds only delays the error.
+    final body = error.response?.data;
+    if (statusCode == 429 && body is Map && body['code'] != null) {
+      return false;
+    }
     if (statusCode != null && retryPolicy.retryableStatusCodes.contains(statusCode)) {
       return true;
     }

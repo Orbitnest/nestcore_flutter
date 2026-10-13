@@ -1,143 +1,47 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'bloc/database_bloc.dart';
-import 'bloc/database_event.dart';
 import 'bloc/database_state.dart';
 import 'models/postgrest_response.dart';
+import 'services/database_service.dart';
 import 'services/query_builder.dart';
-import 'exceptions/database_exception.dart';
 
-/// Simplified Database API that wraps the BLoC pattern
-/// Provides direct async methods and Supabase-compatible query builder for CRUD operations only
+/// Database API: direct async CRUD helpers and a Supabase-style query builder.
+///
+/// Every call goes straight to [DatabaseService] and returns its own future,
+/// so concurrent calls never wait on or receive each other's results.
+/// Failures throw [DatabaseException]; unsupported usage throws
+/// [UnsupportedError] / [ArgumentError] before any request is sent.
 class OrbitNestDatabase extends ChangeNotifier {
   final DatabaseBloc _databaseBloc;
-  final String _projectSlug;
+  final DatabaseService _service;
   late final StreamSubscription _stateSubscription;
 
   DatabaseState _currentState = const DatabaseInitialState();
-  final Map<String, Completer<dynamic>> _pendingOperations = {};
-  int _operationCounter = 0;
 
-  OrbitNestDatabase(this._databaseBloc, this._projectSlug) {
-    _stateSubscription = _databaseBloc.stream.listen(_handleStateChange);
+  OrbitNestDatabase(this._databaseBloc, this._service) {
+    _stateSubscription = _databaseBloc.stream.listen((state) {
+      _currentState = state;
+      notifyListeners();
+    });
     _currentState = _databaseBloc.state;
   }
 
-  void _handleStateChange(DatabaseState state) {
-    _currentState = state;
-    notifyListeners();
-
-    // Complete pending operations based on state changes
-    switch (state) {
-      case DatabaseInitialState():
-        break;
-      case DatabaseLoadingState():
-        break;
-      case DatabaseSqlExecutedState(:final result, :final rowsAffected):
-        _completePendingOperation(
-            'db_success', PostgrestResponse(data: result, count: rowsAffected));
-        break;
-      case DatabaseDataSelectedState(response: final response):
-        _completePendingOperation('db_success', response);
-        break;
-      case DatabaseDataInsertedState(response: final response):
-        _completePendingOperation('db_success', response);
-        break;
-      case DatabaseDataUpdatedState(response: final response):
-        _completePendingOperation('db_success', response);
-        break;
-      case DatabaseDataDeletedState(response: final response):
-        _completePendingOperation('db_success', response);
-        break;
-      case DatabaseBulkInsertedState(:final table, :final count):
-        _completePendingOperation(
-            'db_success',
-            PostgrestResponse(data: [
-              {'table': table, 'count': count}
-            ]));
-        break;
-      case DatabaseBulkUpdatedState(:final table, :final count):
-        _completePendingOperation(
-            'db_success',
-            PostgrestResponse(data: [
-              {'table': table, 'count': count}
-            ]));
-        break;
-      case DatabaseBulkDeletedState(:final table, :final count):
-        _completePendingOperation(
-            'db_success',
-            PostgrestResponse(data: [
-              {'table': table, 'count': count}
-            ]));
-        break;
-      case DatabaseErrorState(
-          :final message,
-          :final code,
-          :final table,
-          :final query
-        ):
-        _completePendingOperationWithError('db_error',
-            DatabaseException(message, code: code, table: table, query: query));
-        break;
-    }
-  }
-
-  void _completePendingOperation(String key, dynamic result) {
-    // Complete all pending operations since database operations don't have specific keys
-    final completers = Map<String, Completer<dynamic>>.from(_pendingOperations);
-    _pendingOperations.clear();
-
-    for (final completer in completers.values) {
-      if (!completer.isCompleted) {
-        completer.complete(result);
-        break; // Only complete the first one
-      }
-    }
-  }
-
-  void _completePendingOperationWithError(String key, Object error) {
-    // Complete all pending operations with error
-    final completers = Map<String, Completer<dynamic>>.from(_pendingOperations);
-    _pendingOperations.clear();
-
-    for (final completer in completers.values) {
-      if (!completer.isCompleted) {
-        completer.completeError(error);
-      }
-    }
-  }
-
-  String _generateOperationKey() {
-    return 'op_${++_operationCounter}_${DateTime.now().millisecondsSinceEpoch}';
-  }
-
-  Future<T> _executeWithCompleter<T>(DatabaseEvent event) async {
-    final completer = Completer<T>();
-    final operationKey = _generateOperationKey();
-    _pendingOperations[operationKey] = completer;
-
-    _databaseBloc.add(event);
-
-    // No manual timeout - rely only on Dio client timeout
-    return completer.future;
-  }
-
-  /// Get current database state
+  /// State of the [DatabaseBloc]. Only reflects events you dispatch to the
+  /// bloc yourself — the methods on this class do not go through it.
   DatabaseState get state => _currentState;
 
-  /// Stream of database state changes
+  /// Stream of [DatabaseBloc] states (see [state]).
   Stream<DatabaseState> get onStateChange => _databaseBloc.stream;
 
-  /// Create a query builder for a table (Supabase-compatible)
+  /// Create a query builder for a table (Supabase-style).
   PostgrestQueryBuilder<Map<String, dynamic>> from(String table) {
-    return PostgrestQueryBuilder<Map<String, dynamic>>.withBloc(
-      databaseBloc: _databaseBloc,
-      table: table,
-      projectSlug: _projectSlug,
-    );
+    return PostgrestQueryBuilder<Map<String, dynamic>>(_service, table);
   }
 
-  /// Select data from a table
+  /// Select rows. [filters] are equality filters (a `null` value means
+  /// `IS NULL`); [orderBy] takes one entry like `'created_at.desc'`;
+  /// [columns] is a plain column list. A page holds at most 100 rows.
   Future<PostgrestResponse<Map<String, dynamic>>> select(
     String table, {
     String columns = '*',
@@ -146,24 +50,17 @@ class OrbitNestDatabase extends ChangeNotifier {
     int? limit,
     int? offset,
   }) async {
-    final filtersMap =
-        filters?.map((key, value) => MapEntry(key, value.toString()));
-
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseSelectEvent(
-        table: table,
-        columns: columns,
-        filters: filtersMap,
-        orders: orderBy,
-        limit: limit,
-        offset: offset,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
+    final order = DatabaseService.parseOrder(orderBy);
+    return _service.executeQuery(
+      table: table,
+      select: columns,
+      filters: filters?.entries
+          .map((e) => DatabaseService.encodeFilter(e.key, 'eq', e.value))
+          .toList(),
+      orderBy: order?.column,
+      ascending: order?.ascending ?? true,
+      limit: limit,
+      offset: offset,
     );
   }
 
@@ -184,7 +81,12 @@ class OrbitNestDatabase extends ChangeNotifier {
     int limit = 10,
   }) async {
     final safe = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
-    if (!safe.hasMatch(table) || !safe.hasMatch(column)) {
+    final cols = columns.trim() == '*'
+        ? null
+        : columns.split(',').map((c) => c.trim()).toList();
+    if (!safe.hasMatch(table) ||
+        !safe.hasMatch(column) ||
+        (cols != null && !cols.every(safe.hasMatch))) {
       throw ArgumentError('vectorSearch: unsafe table/column identifier');
     }
     final op = metric == 'cosine'
@@ -192,169 +94,75 @@ class OrbitNestDatabase extends ChangeNotifier {
         : metric == 'ip'
             ? '<#>'
             : '<->';
-    final vec = '[${vector.join(',')}]';
-    final cols = columns == '*'
-        ? '*'
-        : columns.split(',').map((c) => '"${c.trim()}"').join(', ');
+    final select = cols == null ? '*' : cols.map((c) => '"$c"').join(', ');
     final sql =
-        'SELECT $cols FROM "$table" ORDER BY "$column" $op \$1::vector LIMIT $limit';
-
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseExecuteSqlEvent(sql: sql, parameters: [vec]),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+        'SELECT $select FROM "$table" ORDER BY "$column" $op \$1::vector LIMIT ${limit.toInt()}';
+    return _service.executeSql(sql: sql, parameters: ['[${vector.join(',')}]']);
   }
 
-  /// Insert data into a table
+  /// Insert one row; returns the inserted row. `upsert: true` throws
+  /// [UnsupportedError] — the API has no upsert.
   Future<PostgrestResponse<Map<String, dynamic>>> insert(
     String table,
     Map<String, dynamic> values, {
     bool upsert = false,
   }) async {
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseInsertEvent(
-        table: table,
-        values: values,
-        upsert: upsert,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.insert(table: table, values: values, upsert: upsert);
   }
 
-  /// Update data in a table
+  /// Update rows whose columns equal [filters] (AND). `count` is the number of
+  /// rows updated; `data` is empty. Requires a signed-in user (RLS applies).
   Future<PostgrestResponse<Map<String, dynamic>>> update(
     String table,
     Map<String, dynamic> values, {
     required Map<String, dynamic> filters,
   }) async {
-    final filtersMap =
-        filters.map((key, value) => MapEntry(key, value.toString()));
-
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseUpdateEvent(
-        table: table,
-        values: values,
-        filters: filtersMap,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.updateWhere(table: table, values: values, match: filters);
   }
 
-  /// Delete data from a table
+  /// Delete rows whose columns equal [filters] (AND). `count` is the number of
+  /// rows deleted. Requires a signed-in user (RLS applies).
   Future<PostgrestResponse<Map<String, dynamic>>> delete(
     String table, {
     required Map<String, dynamic> filters,
   }) async {
-    final filtersMap =
-        filters.map((key, value) => MapEntry(key, value.toString()));
-
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseDeleteEvent(
-        table: table,
-        filters: filtersMap,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.deleteWhere(table: table, match: filters);
   }
 
-  /// Insert multiple records (bulk insert)
+  /// Insert several rows (one request per row — not atomic). Returns the
+  /// inserted rows.
   Future<PostgrestResponse<Map<String, dynamic>>> insertMany(
     String table,
     List<Map<String, dynamic>> values,
   ) async {
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseBulkInsertEvent(
-        table: table,
-        values: values,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.bulkInsert(table: table, values: values);
   }
 
-  /// Update multiple records (bulk update)
+  /// Same as [update]: every row matching [filters] gets [values].
   Future<PostgrestResponse<Map<String, dynamic>>> updateMany(
     String table,
     Map<String, dynamic> values, {
     required Map<String, dynamic> filters,
   }) async {
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseBulkUpdateEvent(
-        table: table,
-        values: [values], // Convert single value map to list format
-        matchColumn: 'id', // Default match column
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.updateWhere(table: table, values: values, match: filters);
   }
 
-  /// Delete multiple records (bulk delete)
+  /// Same as [delete]: deletes every row matching [filters] (column = value, AND).
   Future<PostgrestResponse<Map<String, dynamic>>> deleteMany(
     String table, {
     required Map<String, dynamic> filters,
   }) async {
-    final ids = filters.values.toList();
-
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseBulkDeleteEvent(
-        table: table,
-        ids: ids,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.deleteWhere(table: table, match: filters);
   }
 
-  /// Execute raw SQL query
+  /// Execute raw SQL with `$1`, `$2`, … placeholders bound from [parameters].
+  /// Returns the result rows; `count` is the number of rows affected. The anon
+  /// key (with or without a user session) may run SELECT and INSERT only.
   Future<PostgrestResponse<Map<String, dynamic>>> sql(
     String query, {
     List<dynamic>? parameters,
   }) async {
-    final result = await _executeWithCompleter<PostgrestResponse<dynamic>>(
-      DatabaseExecuteSqlEvent(
-        sql: query,
-        parameters: parameters,
-      ),
-    );
-
-    return PostgrestResponse<Map<String, dynamic>>(
-      data: List<Map<String, dynamic>>.from(result.data),
-      count: result.count,
-      error: result.error,
-    );
+    return _service.executeSql(sql: query, parameters: parameters);
   }
 
   @override

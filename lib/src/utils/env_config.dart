@@ -22,13 +22,16 @@ class EnvConfig {
 
     try {
       await dotenv.load(fileName: envFileName ?? '.env');
-      _initialized = true;
-    } catch (e) {
-      // If .env file doesn't exist, still mark as initialized
-      // Environment variables will be used instead
-      _initialized = true;
+    } catch (_) {
+      // No/unreadable .env asset (e.g. key passed to OrbitNestClient.create).
+      // Reads below go through [_env], which tolerates an unloaded dotenv.
     }
+    _initialized = true;
   }
+
+  /// Read a dotenv value; null when no `.env` was loaded (dotenv.env throws then).
+  static String? _env(String key) =>
+      dotenv.isInitialized ? dotenv.env[key] : null;
 
   /// Check if environment is initialized
   static bool get isInitialized => _initialized;
@@ -65,7 +68,7 @@ class EnvConfig {
   /// emulator can reach the host machine.
   static String get baseUrl {
     // Allow an env-var override for local development
-    final envUrl = _initialized ? dotenv.env['ORBITNEST_API_URL'] : null;
+    final envUrl = _env('ORBITNEST_API_URL');
     final raw = (envUrl != null && envUrl.isNotEmpty) ? envUrl : kBaseUrl;
     return resolveUrl(_enforceSecureScheme(raw));
   }
@@ -98,7 +101,7 @@ class EnvConfig {
   /// Get anonymous key
   static String get anonKey {
     _ensureInitialized();
-    final key = dotenv.env['ORBITNEST_ANON_KEY'];
+    final key = _env('ORBITNEST_ANON_KEY');
     if (key == null || key.isEmpty) {
       throw Exception('ORBITNEST_ANON_KEY is required in .env file');
     }
@@ -116,14 +119,14 @@ class EnvConfig {
   /// Check if debug mode is enabled
   static bool get isDebugMode {
     _ensureInitialized();
-    final debug = dotenv.env['ORBITNEST_DEBUG'];
+    final debug = _env('ORBITNEST_DEBUG');
     return debug?.toLowerCase() == 'true';
   }
 
   /// Get API timeout in milliseconds (3 minutes default)
   static int get apiTimeout {
     _ensureInitialized();
-    final timeout = dotenv.env['ORBITNEST_API_TIMEOUT'];
+    final timeout = _env('ORBITNEST_API_TIMEOUT');
     return int.tryParse(timeout ?? '180000') ?? 180000; // 3 minutes default
   }
 
@@ -177,6 +180,6 @@ class EnvConfig {
   /// Get all environment variables as a map (for debugging)
   static Map<String, String> get allVars {
     _ensureInitialized();
-    return Map.from(dotenv.env);
+    return dotenv.isInitialized ? Map.from(dotenv.env) : {};
   }
 }

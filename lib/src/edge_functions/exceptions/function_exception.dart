@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../../client/interceptors/error_interceptor.dart';
 
 /// Edge function-specific exception
@@ -6,6 +7,7 @@ class FunctionException extends OrbitNestException {
     super.message, {
     super.code,
     super.statusCode,
+    super.body,
     this.functionName,
     this.executionId,
     this.executionTimeMs,
@@ -25,7 +27,13 @@ class FunctionException extends OrbitNestException {
         error.message,
         code: error.code,
         statusCode: error.statusCode,
+        body: error.body,
       );
+    }
+
+    // ErrorInterceptor wraps the API error (code, message, body) in DioException.error.
+    if (error is DioException && error.error is OrbitNestException) {
+      return FunctionException.fromException(error.error);
     }
 
     return FunctionException(

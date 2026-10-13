@@ -166,45 +166,59 @@ class RealtimeChannel {
 
   // ─── Internal ────────────────────────────────────────────────────────────────
 
+  /// Message id that lets server `error` frames be routed back to this channel.
+  String _msgId(String kind) =>
+      '$name#${kind}_${DateTime.now().microsecondsSinceEpoch}';
+
+  /// Server-side channel strings this channel subscribes to.
+  Set<String> get _serverChannels => {
+        for (final h in _handlers)
+          if (h.type == 'postgres_changes')
+            'table:${h.schema ?? 'public'}.${h.table}',
+        if (_handlers.any((h) => h.type == 'broadcast') ||
+            _presenceSyncCallbacks.isNotEmpty ||
+            _presenceJoinCallbacks.isNotEmpty ||
+            _presenceLeaveCallbacks.isNotEmpty)
+          'broadcast:$name',
+      };
+
   void _activate() {
     _status = ChannelStatus.connected;
     for (final h in _handlers) {
-      final id = '${name}_${h.type}_${DateTime.now().millisecondsSinceEpoch}';
-      if (h.type == 'postgres_changes') {
-        final schema = h.schema ?? 'public';
-        final events = _pgEventsToStrings(h.pgEvent ?? PgEvent.all);
-        final msg = {
-          'id': id,
-          'type': 'subscribe',
-          'channel': 'table:$schema.${h.table}',
-          'events': events,
-          if (h.filter != null) 'filter': h.filter!.toJson(),
-        };
-        _manager._send(msg);
-      } else if (h.type == 'broadcast') {
-        _manager._send({
-          'id': id,
-          'type': 'subscribe',
-          'channel': 'broadcast:$name',
-        });
-      }
+      if (h.type != 'postgres_changes') continue;
+      final schema = h.schema ?? 'public';
+      _manager._send({
+        'id': _msgId('sub'),
+        'type': 'subscribe',
+        'channel': 'table:$schema.${h.table}',
+        'events': _pgEventsToStrings(h.pgEvent ?? PgEvent.all),
+        if (h.filter != null) 'filter': h.filter!.toJson(),
+      });
+    }
+    if (_serverChannels.contains('broadcast:$name')) {
+      _manager._send({
+        'id': _msgId('sub'),
+        'type': 'subscribe',
+        'channel': 'broadcast:$name',
+      });
     }
   }
 
   void _dispatch(Map<String, dynamic> msg) {
     if (msg['type'] == 'db_event') {
       final payload = PgChangesPayload.fromJson(msg);
-      final event = RealtimeDbEvent(payload);
-      _eventController.add(event);
-
+      var matched = false;
       for (final h in _handlers) {
         if (h.type != 'postgres_changes') continue;
         final ops = _pgEventsToStrings(h.pgEvent ?? PgEvent.all);
         if (!ops.contains(msg['op']) && !ops.contains('*')) continue;
         if (h.table != null && h.table != msg['table']) continue;
         if (h.schema != null && h.schema != msg['schema']) continue;
+        matched = true;
         (h.callback as void Function(PgChangesPayload))(payload);
       }
+      // Only events for this channel's own tables reach [events].
+      if (matched) _eventController.add(RealtimeDbEvent(payload));
     } else if (msg['type'] == 'broadcast') {
       final payload = BroadcastPayload.fromJson(msg);
       _eventController.add(RealtimeBroadcastEvent(payload));
@@ -283,30 +297,54 @@ class RealtimeChannelManager {
   final String? apiKey;
   final String? userJwt;
 
+  /// Supplies the current user access token at connect time (null = anon).
+  final Future<String?> Function()? accessTokenProvider;
+
+  /// Called once when the server rejects the socket's user JWT (close 4001),
+  /// e.g. to refresh the session and [reconnect].
+  final Future<void> Function()? onAuthRejected;
+
   WebSocketChannel? _ws;
+  // onAuthRejected already ran since the last accepted connect (no refresh loop).
+  bool _authRetried = false;
+  Future<void>? _connecting;
   StreamSubscription? _sub;
   final Map<String, RealtimeChannel> _channels = {};
   bool _shouldReconnect = true;
   int _reconnectDelayMs = _kBaseReconnectDelayMs;
   Timer? _reconnectTimer;
 
-  RealtimeChannelManager({required this.wsUrl, this.apiKey, this.userJwt});
+  RealtimeChannelManager({
+    required this.wsUrl,
+    this.apiKey,
+    this.userJwt,
+    this.accessTokenProvider,
+    this.onAuthRejected,
+  });
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-  Future<void> _ensureConnected() async {
-    if (_ws != null) return;
+  /// Connect if needed. Completes only once the socket is really open and
+  /// throws if it cannot be opened (so the reconnect backoff keeps growing).
+  Future<void> _ensureConnected() {
+    if (_ws != null) return Future.value();
+    return _connecting ??= _connect().whenComplete(() => _connecting = null);
+  }
 
+  Future<void> _connect() async {
     final uri = Uri.parse(wsUrl);
     // Pass credentials via WS subprotocols rather than the URL query string so
     // they are not captured in proxy / gateway access logs.
     final protocols = ['orbitnest-realtime-v1'];
     if (apiKey != null) protocols.add('orbitnest.apikey.$apiKey');
-    if (userJwt != null) protocols.add('orbitnest.user-jwt.$userJwt');
+    final jwt = await accessTokenProvider?.call() ?? userJwt;
+    if (jwt != null) protocols.add('orbitnest.user-jwt.$jwt');
 
-    _ws = WebSocketChannel.connect(uri, protocols: protocols);
+    final ws = WebSocketChannel.connect(uri, protocols: protocols);
+    await ws.ready; // throws when the server is unreachable / handshake fails
+    _ws = ws;
 
-    _sub = _ws!.stream.listen(
+    _sub = ws.stream.listen(
       (data) {
         try {
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
@@ -315,6 +353,11 @@ class RealtimeChannelManager {
       },
       onDone: () {
         final code = _ws?.closeCode;
+        // Rejected user JWT (expired / revoked / clock skew): refresh once.
+        if (code == 4001 && jwt != null && !_authRetried && onAuthRejected != null) {
+          _authRetried = true;
+          onAuthRejected!().catchError((_) {});
+        }
         _ws = null;
         _sub = null;
         for (final ch in _channels.values) {
@@ -347,10 +390,25 @@ class RealtimeChannelManager {
       cancelOnError: false,
     );
 
-    // Activate all pending channels once the stream is open.
-    // WebSocketChannel connects synchronously; activation is also synchronous.
+    // Activate all channels now that the socket is open.
     for (final ch in _channels.values) {
       ch._activate();
+    }
+  }
+
+  /// Drop the current socket (without firing the reconnect handler) and open
+  /// a new one if any channel is subscribed, picking up the current user token.
+  Future<void> reconnect() async {
+    await _sub?.cancel();
+    _sub = null;
+    await _ws?.sink.close();
+    _ws = null;
+    if (_channels.isEmpty) return;
+    _shouldReconnect = true;
+    try {
+      await _ensureConnected();
+    } catch (_) {
+      _scheduleReconnect();
     }
   }
 
@@ -382,17 +440,31 @@ class RealtimeChannelManager {
 
   Future<void> _subscribe(RealtimeChannel ch) async {
     _channels[ch.name] = ch;
-    await _ensureConnected();
-    ch._activate();
+    _shouldReconnect = true;
+    if (_ws != null) {
+      ch._activate();
+      return;
+    }
+    try {
+      await _ensureConnected(); // activates every registered channel
+    } catch (_) {
+      ch._setStatus(ChannelStatus.error);
+      _scheduleReconnect();
+    }
   }
 
   Future<void> _unsubscribe(RealtimeChannel ch) async {
     _channels.remove(ch.name);
-    _send({
-      'id': 'unsub_${DateTime.now().millisecondsSinceEpoch}',
-      'type': 'unsubscribe',
-      'channel': ch.name,
-    });
+    // The server keys subscriptions by full channel string and channels share
+    // one socket, so keep any that a remaining channel still uses.
+    final stillUsed = {for (final c in _channels.values) ...c._serverChannels};
+    for (final channel in ch._serverChannels.difference(stillUsed)) {
+      _send({
+        'id': ch._msgId('unsub'),
+        'type': 'unsubscribe',
+        'channel': channel,
+      });
+    }
     if (_channels.isEmpty) {
       _shouldReconnect = false;
       await _ws?.sink.close();
@@ -404,7 +476,7 @@ class RealtimeChannelManager {
       String channelName, String event, dynamic payload) async {
     await _ensureConnected();
     _send({
-      'id': 'bc_${DateTime.now().millisecondsSinceEpoch}',
+      'id': '$channelName#bc_${DateTime.now().microsecondsSinceEpoch}',
       'type': 'broadcast',
       'channel': 'broadcast:$channelName',
       'event': event,
@@ -430,7 +502,17 @@ class RealtimeChannelManager {
       final target = _channels[channelName];
       if (target != null) target._dispatch(msg);
     } else if (msg['type'] == 'system') {
+      if (msg['event'] == 'connected') _authRetried = false;
       for (final ch in _channels.values) {
+        ch._dispatch(msg);
+      }
+    } else if (msg['type'] == 'error') {
+      // Route by the channel name we put in the request id; errors without a
+      // ref (e.g. auth_failed) concern every channel.
+      final ref = msg['ref'] as String?;
+      final hash = ref?.lastIndexOf('#') ?? -1;
+      final target = hash > 0 ? _channels[ref!.substring(0, hash)] : null;
+      for (final ch in target != null ? [target] : _channels.values.toList()) {
         ch._dispatch(msg);
       }
     }
@@ -440,17 +522,18 @@ class RealtimeChannelManager {
       String channelName, Map<String, dynamic> state) async {
     await _ensureConnected();
     _send({
-      'id': 'pt_${DateTime.now().millisecondsSinceEpoch}',
+      'id': '$channelName#pt_${DateTime.now().microsecondsSinceEpoch}',
       'type': 'presence.track',
       'channel': 'broadcast:$channelName',
       'state': state,
     });
   }
 
+  /// Drops presence only; the broadcast subscription stays. No ack is sent.
   Future<void> _untrackPresence(String channelName) async {
     _send({
-      'id': 'pu_${DateTime.now().millisecondsSinceEpoch}',
-      'type': 'unsubscribe',
+      'id': '$channelName#pu_${DateTime.now().microsecondsSinceEpoch}',
+      'type': 'presence.untrack',
       'channel': 'broadcast:$channelName',
     });
   }

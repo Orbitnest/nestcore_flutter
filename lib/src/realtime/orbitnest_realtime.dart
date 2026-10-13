@@ -22,6 +22,8 @@ class OrbitNestRealtime {
     required String projectSlug,
     required String apiKey,
     String? userJwt,
+    Future<String?> Function()? accessTokenProvider,
+    Future<void> Function()? onAuthRejected,
   }) : _manager = RealtimeChannelManager(
           // Keep only the project slug in the URL. The apikey is passed via the
           // WebSocket subprotocol (see RealtimeChannelManager) instead of the
@@ -30,6 +32,8 @@ class OrbitNestRealtime {
               '/realtime/v1/ws?project=$projectSlug',
           apiKey: apiKey,
           userJwt: userJwt,
+          accessTokenProvider: accessTokenProvider,
+          onAuthRejected: onAuthRejected,
         );
 
   /// Create or retrieve a named channel.
@@ -37,6 +41,10 @@ class OrbitNestRealtime {
   /// Chain [RealtimeChannel.onPostgresChanges] / [RealtimeChannel.onBroadcast]
   /// calls, then call [RealtimeChannel.subscribe] to connect.
   RealtimeChannel channel(String name) => RealtimeChannel(name, _manager);
+
+  /// Re-open the WebSocket (when channels are subscribed) so it picks up the
+  /// current user token. Called automatically on sign-in / sign-out.
+  Future<void> reconnect() => _manager.reconnect();
 
   /// Release all resources (closes the WebSocket).
   Future<void> dispose() => _manager.dispose();

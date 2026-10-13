@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../repositories/database_repository.dart';
+import '../services/database_service.dart';
 import '../exceptions/database_exception.dart';
 import 'database_event.dart';
 import 'database_state.dart';
@@ -37,7 +38,8 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
       );
 
       emit(DatabaseSqlExecutedState(
-        result: result,
+        result: result.data,
+        rowsAffected: result.count,
       ));
     } catch (e) {
       emit(DatabaseErrorState(
@@ -54,12 +56,15 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
     emit(const DatabaseLoadingState());
 
     try {
+      final order = DatabaseService.parseOrder(event.orders);
       final result = await _databaseRepository.executeQuery(
         table: event.table,
         select: event.columns ?? '*',
-        filters:
-            event.filters?.entries.map((e) => '${e.key}=${e.value}').toList(),
-        orders: event.orders,
+        filters: event.filters?.entries
+            .map((e) => DatabaseService.encodeFilter(e.key, 'eq', e.value))
+            .toList(),
+        orderBy: order?.column,
+        ascending: order?.ascending ?? true,
         limit: event.limit,
         offset: event.offset,
       );
@@ -88,8 +93,6 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
         table: event.table,
         values: event.values,
         upsert: event.upsert,
-        onConflict: event.onConflict,
-        ignoreDuplicates: event.ignoreDuplicates,
       );
 
       emit(DatabaseDataInsertedState(
@@ -115,8 +118,7 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
       final result = await _databaseRepository.update(
         table: event.table,
         values: event.values,
-        filters:
-            event.filters?.entries.map((e) => '${e.key}=${e.value}').toList(),
+        match: event.filters ?? const {},
       );
 
       emit(DatabaseDataUpdatedState(
@@ -141,8 +143,7 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
     try {
       final result = await _databaseRepository.delete(
         table: event.table,
-        filters:
-            event.filters?.entries.map((e) => '${e.key}=${e.value}').toList(),
+        match: event.filters ?? const {},
       );
 
       emit(DatabaseDataDeletedState(
@@ -165,17 +166,15 @@ class DatabaseBloc extends Bloc<DatabaseEvent, DatabaseState> {
     emit(const DatabaseLoadingState());
 
     try {
-      final count = await _databaseRepository.bulkInsert(
+      if (event.upsert) throw DatabaseService.upsertUnsupported();
+      final result = await _databaseRepository.bulkInsert(
         table: event.table,
         values: event.values,
-        upsert: event.upsert,
-        onConflict: event.onConflict,
-        ignoreDuplicates: event.ignoreDuplicates,
       );
 
       emit(DatabaseBulkInsertedState(
         table: event.table,
-        count: count,
+        count: result.count ?? 0,
       ));
     } catch (e) {
       emit(DatabaseErrorState(

@@ -53,6 +53,8 @@ class Endpoints {
       '/api/projects/$projectId/auth/reset-password';
   static String projectUser(String projectId) =>
       '/api/projects/$projectId/auth/user';
+  static String projectVerifyEmailChange(String projectId) =>
+      '/api/projects/$projectId/auth/user/email/verify';
   static String projectUpdateUser(String projectId) =>
       '/api/projects/$projectId/auth/user';
   static String projectDeleteUser(String projectId) =>

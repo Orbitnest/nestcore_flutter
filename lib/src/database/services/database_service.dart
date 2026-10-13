@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show Response;
 import '../../client/http_client.dart';
 import '../../constants/endpoints.dart';
 import '../models/postgrest_response.dart';
@@ -15,26 +16,28 @@ class DatabaseService {
   }) : _httpClient = httpClient,
        _projectSlug = projectSlug;
 
-  /// Execute raw SQL query
-  Future<List<Map<String, dynamic>>> executeSql({
+  /// Execute raw SQL. Positional placeholders are `$1`, `$2`, … and are bound
+  /// from [parameters]. Returns the result rows; `count` is `rows_affected`.
+  Future<PostgrestResponse<Map<String, dynamic>>> executeSql({
     required String sql,
     List<dynamic>? parameters,
   }) async {
     try {
       final response = await _httpClient.post(
         Endpoints.projectDatabaseSql(_projectSlug),
+        // The API DTO field is `params`; unknown fields are rejected with 400.
         data: {
           'sql': sql,
-          if (parameters != null) 'parameters': parameters,
+          if (parameters != null) 'params': parameters,
         },
       );
-
-      if (response.data is List) {
-        return List<Map<String, dynamic>>.from(response.data);
-      } else if (response.data is Map) {
-        return [Map<String, dynamic>.from(response.data)];
-      }
-      return [];
+      // Response: {success, execution_time_ms, rows_affected, columns, data: [...rows], message}
+      final body = response.data;
+      return PostgrestResponse<Map<String, dynamic>>(
+        data: _rows(body),
+        count: body is Map ? (body['rows_affected'] as num?)?.toInt() : null,
+        status: response.statusCode,
+      );
     } catch (e) {
       throw DatabaseException.fromException(e);
     }
@@ -147,68 +150,88 @@ class DatabaseService {
     }
   }
 
-  /// Execute a query (used by PostgrestQueryBuilder)
+
+  /// Filter operators the API's `filter=column:operator:value` parser supports
+  /// (`database-ops.service.ts` getTableData). Anything else is silently
+  /// ignored server-side, which would return unfiltered rows — so we reject it.
+  static const supportedFilterOperators = {
+    'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'ilike', 'in', 'is',
+  };
+
+  /// Encode one filter as `column:operator:value` for the data endpoint.
+  /// Throws instead of sending a filter the server would drop.
+  static String encodeFilter(String column, String operator, Object? value) {
+    var op = operator.toLowerCase();
+    if (op == 'eq' && value == null) op = 'is';
+    if (!supportedFilterOperators.contains(op)) {
+      throw UnsupportedError(
+          'Filter operator "$operator" is not supported by the OrbitNest data API. '
+          'Supported: ${supportedFilterOperators.join(', ')}. Use database.sql() for other queries.');
+    }
+    if (!_identifier.hasMatch(column)) {
+      throw ArgumentError.value(column, 'column', 'Invalid column name');
+    }
+    final String v;
+    if (op == 'in') {
+      if (value is! Iterable || value.isEmpty) {
+        throw ArgumentError.value(value, 'value', '"in" needs a non-empty list');
+      }
+      final items = value.map((e) => '$e').toList();
+      if (items.any((e) => e.contains(','))) {
+        throw ArgumentError.value(value, 'value', '"in" values cannot contain ","');
+      }
+      v = items.join(',');
+    } else {
+      v = '$value';
+    }
+    if (op == 'is' && !const {'null', 'true', 'false'}.contains(v.toLowerCase())) {
+      throw ArgumentError.value(value, 'value', '"is" accepts only null, true or false');
+    }
+    return '$column:$op:$v';
+  }
+
+  /// Read rows: `GET /database/tables/:table/data` with repeatable `filter`,
+  /// `sortBy`/`sortOrder` and `limit` (or `from`/`to` when [offset] is set).
+  /// The server caps a page at 100 rows. [select] is applied client-side
+  /// (plain column lists only — the API always returns every column).
   Future<PostgrestResponse<Map<String, dynamic>>> executeQuery({
     required String table,
-    required String select,
+    String select = '*',
     List<String>? filters,
-    List<String>? orders,
+    String? orderBy,
+    bool ascending = true,
     int? limit,
     int? offset,
   }) async {
+    final columns = _parseSelect(select);
+    final queryParams = <String, dynamic>{
+      if (filters != null && filters.isNotEmpty) 'filter': filters,
+      if (orderBy != null) 'sortBy': orderBy,
+      if (orderBy != null) 'sortOrder': ascending ? 'ASC' : 'DESC',
+    };
+    if (offset != null) {
+      queryParams['from'] = '$offset';
+      queryParams['to'] = '${offset + (limit ?? 50) - 1}';
+    } else if (limit != null) {
+      queryParams['limit'] = '$limit';
+    }
+
     try {
-      final queryParams = <String, dynamic>{
-        'select': select,
-      };
-
-      if (filters != null && filters.isNotEmpty) {
-        for (final filter in filters) {
-          final parts = filter.split('=');
-          if (parts.length == 2) {
-            queryParams[parts[0]] = parts[1];
-          }
-        }
-      }
-
-      if (orders != null && orders.isNotEmpty) {
-        queryParams['order'] = orders.join(',');
-      }
-
-      if (limit != null) {
-        queryParams['limit'] = limit.toString();
-      }
-
-      if (offset != null) {
-        queryParams['offset'] = offset.toString();
-      }
-
       final response = await _httpClient.get(
         Endpoints.projectDatabaseTableData(_projectSlug, table),
         queryParameters: queryParams,
       );
-
-      // Backend returns {success, table_name, total_rows, returned_rows, page, limit, columns, data: [...]}
-      // Extract the actual data array from the response
-      final dynamic responseData = response.data;
-      final List<dynamic> dataArray;
-      
-      if (responseData is Map<String, dynamic> && responseData.containsKey('data')) {
-        // Wrapped format from backend
-        dataArray = responseData['data'] as List<dynamic>;
-      } else if (responseData is List) {
-        // Direct array format (fallback)
-        dataArray = responseData;
-      } else {
-        dataArray = [];
+      // {success, table_name, total_rows, returned_rows, page, limit, columns, data: [...]}
+      final body = response.data;
+      var rows = _rows(body);
+      if (columns != null) {
+        rows = rows
+            .map((r) => {for (final c in columns) if (r.containsKey(c)) c: r[c]})
+            .toList();
       }
-
       return PostgrestResponse<Map<String, dynamic>>(
-        data: List<Map<String, dynamic>>.from(dataArray),
-        count: responseData is Map<String, dynamic> 
-            ? responseData['total_rows'] as int?
-            : response.headers.map['x-total-count']?.first != null
-                ? int.tryParse(response.headers.map['x-total-count']!.first)
-                : null,
+        data: rows,
+        count: body is Map ? (body['total_rows'] as num?)?.toInt() : null,
         status: response.statusCode,
       );
     } catch (e) {
@@ -216,41 +239,23 @@ class DatabaseService {
     }
   }
 
-  /// Insert data
+  /// Insert one row; returns the inserted row (server-generated fields included).
+  /// The API has no upsert, so [upsert] throws rather than silently inserting.
   Future<PostgrestResponse<Map<String, dynamic>>> insert({
     required String table,
     required Map<String, dynamic> values,
     bool upsert = false,
-    String? onConflict,
-    bool ignoreDuplicates = false,
   }) async {
+    if (upsert) throw upsertUnsupported();
     try {
       final response = await _httpClient.post(
         Endpoints.projectDatabaseTableRows(_projectSlug, table),
         data: values,
-        queryParameters: {
-          if (upsert) 'upsert': 'true',
-          if (onConflict != null) 'on_conflict': onConflict,
-          if (ignoreDuplicates) 'ignore_duplicates': 'true',
-        },
       );
-
-      // Backend wraps the result: {success, rows_affected, message, data: [...rows]}
-      // Extract the actual inserted rows so callers get server-generated fields (id, timestamps, etc.)
-      final dynamic responseData = response.data;
-      final List<dynamic> rows;
-      if (responseData is Map<String, dynamic> && responseData.containsKey('data')) {
-        rows = responseData['data'] as List<dynamic>;
-      } else if (responseData is List) {
-        rows = responseData;
-      } else if (responseData is Map<String, dynamic>) {
-        rows = [responseData];
-      } else {
-        rows = [];
-      }
-
+      final body = response.data;
       return PostgrestResponse<Map<String, dynamic>>(
-        data: rows.whereType<Map<String, dynamic>>().toList(),
+        data: _rows(body),
+        count: body is Map ? (body['rows_affected'] as num?)?.toInt() : null,
         status: response.statusCode,
       );
     } catch (e) {
@@ -258,141 +263,155 @@ class DatabaseService {
     }
   }
 
-  /// Update data.
-  /// Routes through the bulk-update endpoint (`PUT /rows/bulk`) because the
-  /// single-row endpoint requires an explicit row ID that isn't available here.
-  /// Filters like ['id=123', 'status=active'] are parsed into a `where` map.
-  Future<PostgrestResponse<Map<String, dynamic>>> update({
-    required String table,
-    required Map<String, dynamic> values,
-    List<String>? filters,
-  }) async {
-    try {
-      final whereMap = _parseFiltersToMap(filters);
-      final response = await _httpClient.put(
-        Endpoints.projectDatabaseTableBulkUpdate(_projectSlug, table),
-        data: [
-          {'where': whereMap, 'data': values}
-        ],
-      );
-      final List<dynamic> resultList =
-          response.data is List ? response.data as List : [];
-      return PostgrestResponse<Map<String, dynamic>>(
-        data: resultList.whereType<Map<String, dynamic>>().toList(),
-        status: response.statusCode,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
-
-  /// Delete data.
-  /// Routes through the bulk-delete endpoint (`DELETE /rows/bulk`) because the
-  /// single-row endpoint requires an explicit row ID that isn't available here.
-  Future<PostgrestResponse<Map<String, dynamic>>> delete({
-    required String table,
-    List<String>? filters,
-  }) async {
-    try {
-      final conditions = _parseFiltersToMap(filters);
-      final response = await _httpClient.delete(
-        Endpoints.projectDatabaseTableBulkDelete(_projectSlug, table),
-        data: [conditions],
-      );
-      return PostgrestResponse<Map<String, dynamic>>(
-        data: [],
-        status: response.statusCode,
-      );
-    } catch (e) {
-      throw DatabaseException.fromException(e);
-    }
-  }
-
-  /// Bulk insert.
-  /// Sends the rows array directly — the backend expects `Record<string,any>[]`,
-  /// not the previously wrapped `{ rows: [...] }` shape.
-  Future<int> bulkInsert({
+  /// Insert several rows, one request each. The bulk-insert route requires
+  /// the service-role key, which a client app never holds.
+  /// shortcut: not atomic — rows inserted before a failure stay; upgrade when
+  /// the API allows user-token bulk insert.
+  Future<PostgrestResponse<Map<String, dynamic>>> bulkInsert({
     required String table,
     required List<Map<String, dynamic>> values,
-    bool upsert = false,
-    String? onConflict,
-    bool ignoreDuplicates = false,
   }) async {
-    try {
-      final response = await _httpClient.post(
-        Endpoints.projectDatabaseTableBulkInsert(_projectSlug, table),
-        data: values,
-        queryParameters: {
-          if (upsert) 'upsert': 'true',
-          if (onConflict != null) 'on_conflict': onConflict,
-          if (ignoreDuplicates) 'ignore_duplicates': 'true',
-        },
-      );
-      final dynamic count = response.data is Map ? response.data['count'] : null;
-      return (count as int?) ?? values.length;
-    } catch (e) {
-      throw DatabaseException.fromException(e);
+    final rows = <Map<String, dynamic>>[];
+    for (final v in values) {
+      rows.addAll((await insert(table: table, values: v)).data);
     }
+    return PostgrestResponse<Map<String, dynamic>>(data: rows, count: rows.length);
   }
 
-  /// Bulk update.
-  /// Converts `(values, matchColumn)` into the `[{where, data}]` shape the
-  /// backend expects. Each row's `matchColumn` key becomes the `where` filter
-  /// and the remaining keys become `data`.
+  /// Update every row whose columns equal [match] (AND). Returns no rows;
+  /// `count` is the number of rows updated. Needs a signed-in user (RLS applies).
+  Future<PostgrestResponse<Map<String, dynamic>>> updateWhere({
+    required String table,
+    required Map<String, dynamic> values,
+    required Map<String, dynamic> match,
+  }) async {
+    if (values.isEmpty) throw ArgumentError('update values cannot be empty');
+    _requireMatch(match);
+    return _bulk(
+      () => _httpClient.put(
+        Endpoints.projectDatabaseTableBulkUpdate(_projectSlug, table),
+        data: [
+          {'where': match, 'data': values}
+        ],
+      ),
+    );
+  }
+
+  /// Delete every row whose columns equal [match] (AND). `count` is the number
+  /// of rows deleted. Needs a signed-in user (RLS applies).
+  Future<PostgrestResponse<Map<String, dynamic>>> deleteWhere({
+    required String table,
+    required Map<String, dynamic> match,
+  }) async {
+    _requireMatch(match);
+    return _bulk(
+      () => _httpClient.delete(
+        Endpoints.projectDatabaseTableBulkDelete(_projectSlug, table),
+        data: [match],
+      ),
+    );
+  }
+
+  /// Bulk update with an explicit match column: each row's [matchColumn] value
+  /// selects the row, the remaining keys are the new values.
   Future<int> bulkUpdate({
     required String table,
     required List<Map<String, dynamic>> values,
     required String matchColumn,
   }) async {
-    try {
-      final updates = values.map((row) {
-        final data = Map<String, dynamic>.from(row)..remove(matchColumn);
-        return {'where': {matchColumn: row[matchColumn]}, 'data': data};
-      }).toList();
-
-      final response = await _httpClient.put(
-        Endpoints.projectDatabaseTableBulkUpdate(_projectSlug, table),
-        data: updates,
-      );
-      final dynamic count = response.data is Map ? response.data['count'] : null;
-      return (count as int?) ?? values.length;
-    } catch (e) {
-      throw DatabaseException.fromException(e);
+    if (values.isEmpty || values.any((row) => row[matchColumn] == null)) {
+      throw ArgumentError('Every row needs a non-null "$matchColumn"');
     }
+    final res = await _bulk(
+      () => _httpClient.put(
+        Endpoints.projectDatabaseTableBulkUpdate(_projectSlug, table),
+        data: values.map((row) {
+          final data = Map<String, dynamic>.from(row)..remove(matchColumn);
+          return {'where': {matchColumn: row[matchColumn]}, 'data': data};
+        }).toList(),
+      ),
+    );
+    return res.count ?? 0;
   }
 
-  /// Bulk delete.
-  /// Converts `(ids, idColumn)` into the `[{idColumn: id}, ...]` conditions
-  /// array the backend expects (previously sent `{ids, id_column}` object).
+  /// Bulk delete by explicit ids: `DELETE … WHERE idColumn = id` for each id.
   Future<int> bulkDelete({
     required String table,
     required List<dynamic> ids,
     String idColumn = 'id',
   }) async {
-    try {
-      final conditions = ids.map((id) => {idColumn: id}).toList();
-      final response = await _httpClient.delete(
+    if (ids.isEmpty || ids.any((id) => id == null)) {
+      throw ArgumentError('ids must be a non-empty list of non-null values');
+    }
+    final res = await _bulk(
+      () => _httpClient.delete(
         Endpoints.projectDatabaseTableBulkDelete(_projectSlug, table),
-        data: conditions,
+        data: ids.map((id) => {idColumn: id}).toList(),
+      ),
+    );
+    return res.count ?? 0;
+  }
+
+  Future<PostgrestResponse<Map<String, dynamic>>> _bulk(
+    Future<Response<dynamic>> Function() send,
+  ) async {
+    try {
+      final response = await send();
+      // {success, rows_affected, message}
+      final body = response.data;
+      return PostgrestResponse<Map<String, dynamic>>(
+        data: const [],
+        count: body is Map ? (body['rows_affected'] as num?)?.toInt() : null,
+        status: response.statusCode,
       );
-      final dynamic count = response.data is Map ? response.data['count'] : null;
-      return (count as int?) ?? ids.length;
     } catch (e) {
       throw DatabaseException.fromException(e);
     }
   }
 
-  /// Parses PostgREST-style filter strings (`['col=val', ...]`) into a map
-  /// suitable for use as a `where` condition body.
-  Map<String, dynamic> _parseFiltersToMap(List<String>? filters) {
-    if (filters == null || filters.isEmpty) return {};
-    final result = <String, dynamic>{};
-    for (final f in filters) {
-      final idx = f.indexOf('=');
-      if (idx > 0) {
-        result[f.substring(0, idx)] = f.substring(idx + 1);
-      }
+  static void _requireMatch(Map<String, dynamic> match) {
+    // An empty match would target every row (the server rejects it anyway);
+    // a null value never matches (`col = NULL`), so the call would silently do nothing.
+    if (match.isEmpty) {
+      throw ArgumentError('filters cannot be empty — refusing to touch every row');
     }
-    return result;
+    if (match.values.any((v) => v == null)) {
+      throw ArgumentError('filters cannot contain null values (column = NULL never matches)');
+    }
+  }
+
+  /// Parse PostgREST-style order strings (`'created_at.desc'`). The API sorts
+  /// by one column only, so more than one entry throws rather than being dropped.
+  static ({String column, bool ascending})? parseOrder(List<String>? orders) {
+    if (orders == null || orders.isEmpty) return null;
+    if (orders.length > 1) {
+      throw UnsupportedError('The OrbitNest data API sorts by one column only (got $orders)');
+    }
+    final parts = orders.single.split('.');
+    return (column: parts.first.trim(), ascending: !parts.contains('desc'));
+  }
+
+  static UnsupportedError upsertUnsupported() => UnsupportedError(
+      'Upsert is not supported by the OrbitNest data API. '
+      'Insert, catch the duplicate-key DatabaseException, then update.');
+
+  static final _identifier = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+
+  /// Columns from a plain `a, b, c` select list; null for `*`.
+  static List<String>? _parseSelect(String select) {
+    final s = select.trim();
+    if (s.isEmpty || s == '*') return null;
+    final cols = s.split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toList();
+    if (cols.any((c) => !_identifier.hasMatch(c))) {
+      throw UnsupportedError(
+          'select("$select"): only plain column lists are supported (no *, aliases or embedded relations)');
+    }
+    return cols;
+  }
+
+  static List<Map<String, dynamic>> _rows(dynamic body) {
+    final raw = body is Map ? body['data'] : body;
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((r) => Map<String, dynamic>.from(r)).toList();
   }
 }

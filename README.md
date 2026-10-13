@@ -1,6 +1,6 @@
 # OrbitNest Studio Flutter
 
-The official Flutter client for [OrbitNest Studio](https://studio.orbitnest.io) — a Postgres-backed application platform. One SDK for authentication, database queries, realtime, storage, edge functions, background jobs, and migrations, with a Supabase-compatible API for easy migration.
+The official Flutter client for [OrbitNest Studio](https://studio.orbitnest.io) — a Postgres-backed application platform. One SDK for authentication, database queries, realtime, storage, and edge functions, with a Supabase-style API.
 
 The client is built on the BLoC pattern internally, but you don't need to know BLoC to use it: every feature is exposed through plain `async`/`await` methods. Reactive state streams are available when you want them.
 
@@ -14,8 +14,7 @@ The client is built on the BLoC pattern internally, but you don't need to know B
 - [Storage](#storage)
 - [Realtime](#realtime)
 - [Edge functions](#edge-functions)
-- [Background jobs](#background-jobs)
-- [Migrations](#migrations)
+- [Analytics](#analytics)
 - [Reactive state with BLoC](#reactive-state-with-bloc)
 - [Error handling](#error-handling)
 - [Migrating from Supabase](#migrating-from-supabase)
@@ -25,7 +24,7 @@ The client is built on the BLoC pattern internally, but you don't need to know B
 
 ```yaml
 dependencies:
-  orbitnest_studio_flutter: ^1.5.0
+  orbitnest_studio_flutter: ^1.7.0
 ```
 
 ```bash
@@ -50,7 +49,7 @@ ORBITNEST_DEBUG=false
 # ORBITNEST_API_URL=http://localhost:3002
 ```
 
-Register `.env` as an asset in your app's `pubspec.yaml`:
+Register `.env` as an asset in your app's `pubspec.yaml` (or skip `.env` entirely and pass `anonKey:` to `OrbitNestClient.create`):
 
 ```yaml
 flutter:
@@ -92,8 +91,7 @@ orbitnest.database    // database CRUD + query builder
 orbitnest.storage     // file storage
 orbitnest.realtime    // live subscriptions, broadcast, presence
 orbitnest.functions   // edge function invocation
-orbitnest.jobs        // background jobs
-orbitnest.migrations  // server-side migration runs
+orbitnest.analytics   // events, screens, crashes
 ```
 
 ## Authentication
@@ -110,13 +108,25 @@ final result = await orbitnest.auth.signInWithPassword(
   email: 'user@example.com',
   password: 'secret123',
 );
-final user = result['user'] as User;
+if (result['mfa_required'] == true) {
+  // see "Multi-factor authentication" below
+} else {
+  final user = User.fromJson(result['user']);
+}
 
+// Forgot password: emails a code, then reset with it. The user signs in again
+// afterwards (resetPassword returns {email, message}, no session).
 await orbitnest.auth.resetPasswordForEmail('user@example.com');
 await orbitnest.auth.resetPassword(
   email: 'user@example.com',
   token: '123456',
   newPassword: 'newSecret123',
+);
+
+// Changing the password or email of a signed-in user needs the current password.
+await orbitnest.auth.updateUser(
+  password: 'newSecret456',
+  currentPassword: 'newSecret123',
 );
 ```
 
@@ -136,7 +146,10 @@ Requires SMS to be configured for your project. Phone numbers are E.164 (e.g. `+
 ```dart
 await orbitnest.auth.signInWithSms('+15555550123');
 await orbitnest.auth.verifySmsOtp(phone: '+15555550123', code: '123456');
+// Signed in: isAuthenticated, currentUser and onAuthStateChange update.
 ```
+
+Sending is rate limited per phone (`AuthException.code == 'SMS_RATE_LIMITED'`, HTTP 429); too many wrong codes give `OTP_RATE_LIMITED`.
 
 ### Multi-factor authentication (TOTP)
 
@@ -155,8 +168,11 @@ final recoveryCodes = verified['recovery_codes']; // shown once — store safely
 await orbitnest.auth.verifyMfa(challengeToken: '...', code: '123456');
 
 await orbitnest.auth.listMfaFactors();
-await orbitnest.auth.regenerateMfaRecoveryCodes();
-await orbitnest.auth.unenrollMfa(factorId: '...');
+
+// Once a factor is verified, these need a current TOTP or recovery code:
+await orbitnest.auth.regenerateMfaRecoveryCodes(code: '123456');
+await orbitnest.auth.unenrollMfa(factorId: '...', code: '123456');
+await orbitnest.auth.enrollMfaTotp(friendlyName: 'Backup phone', code: '123456');
 ```
 
 ### Passkeys (WebAuthn)
@@ -183,57 +199,72 @@ if (await orbitnest.auth.isPasskeySupported()) {
 orbitnest.auth.isAuthenticated;        // bool
 orbitnest.auth.currentUser;            // User?
 orbitnest.auth.currentSession;         // Session?
-await orbitnest.auth.refreshSession();
+await orbitnest.auth.refreshSession();   // throws AuthException on failure
 await orbitnest.auth.signOut();
+await orbitnest.auth.deleteUser();       // deletes the account, then signs out locally
 
 // React to changes (optional).
 orbitnest.auth.onAuthStateChange.listen((state) { /* ... */ });
 
-// Fires when the server rejects the session and it can't be recovered.
+// Fires when the server rejects the refresh token (the session is over).
 orbitnest.onSessionExpired.listen((_) => goToLogin());
 ```
 
-Sessions are stored in encrypted device storage. Tokens refresh automatically ahead of expiry.
+Sessions are stored in encrypted device storage. Tokens refresh automatically ahead of expiry. If a refresh fails because the device is offline or the server is down, the stored session is kept and the refresh is retried on the next request. A plain `401`/`403` on a data or function call (for example an anonymous user calling `update`) is thrown to the caller and does **not** fire `onSessionExpired`.
 
 ## Database
 
-A Supabase-compatible query builder plus direct CRUD helpers. Queries run against your existing tables and respect Row Level Security.
+A Supabase-style query builder plus direct CRUD helpers over the OrbitNest data API. Reads work with the anon key; `update`/`delete` need a signed-in user. Row Level Security applies.
 
 ### Query builder
 
 ```dart
 final posts = await orbitnest
     .from('posts')
-    .select('*, author:users(name)')
+    .select('id, title, created_at')     // plain column list, or '*'
     .eq('published', true)
     .gte('created_at', '2024-01-01')
     .order('created_at', ascending: false)
-    .range(0, 49)         // pagination
+    .range(0, 49)                         // rows 0..49
     .execute();
+print(posts.data);   // rows
+print(posts.count);  // total matching rows
 
 await orbitnest.from('users').insert({'name': 'Jane', 'email': 'jane@x.io'});
-await orbitnest.from('users').upsert({'id': 1, 'name': 'Jane'}, onConflict: 'id');
-await orbitnest.from('users').update({'status': 'inactive'}).execute(); // filter, then update
-await orbitnest.from('users').delete().execute();
+await orbitnest.from('users').insert([{'name': 'A'}, {'name': 'B'}]);
+
+// Filters come first; update()/delete() run immediately. Equality filters only.
+await orbitnest.from('users').eq('id', 1).update({'status': 'inactive'});
+await orbitnest.from('users').eq('id', 1).delete();
 ```
 
-Filters: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `isFilter`, `isNull`, `isNotNull`, `inFilter`, `contains`, `containedBy`, `overlaps`, the `range*` family, `textSearch`, `match`, `not`, `or`, `and`, `filter`.
-Modifiers: `order`, `limit`, `range`, `single`, `maybeSingle`.
+Filters: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `inFilter`, `isFilter` / `isNull` (`null`, `true`, `false`), `match`, `not(col, 'eq', v)`.
+Modifiers: `order` (one column), `limit`, `range`, `single`, `maybeSingle`. A page holds at most 100 rows.
+
+Limits of the API, enforced by the SDK (they throw instead of silently returning wrong rows):
+- `contains`, `containedBy`, `overlaps`, the `range*` filters, `textSearch`, `or`, `and`, `isNotNull` and `upsert` throw `UnsupportedError`. Use `database.sql()` for those queries.
+- `inFilter` values cannot contain `,`.
+- `select()` takes plain column names (no aliases or embedded relations).
+- `update()`/`delete()` require at least one filter; they match rows with `column = value` (AND).
 
 ### Direct CRUD
 
 ```dart
 final res = await orbitnest.database.select('users',
-  columns: 'id, name', filters: {'status': 'active'}, limit: 10);
+  columns: 'id, name', filters: {'status': 'active'},
+  orderBy: ['created_at.desc'], limit: 10, offset: 20);
 print(res.data);
 
 await orbitnest.database.insert('users', {'name': 'Sam'});
 await orbitnest.database.update('users', {'age': 31}, filters: {'id': 1});
 await orbitnest.database.delete('users', filters: {'id': 1});
 
-await orbitnest.database.insertMany('users', [ {...}, {...} ]);
-await orbitnest.database.updateMany('users', {'tier': 'pro'}, filters: {'plan': 'paid'});
-await orbitnest.database.deleteMany('users', filters: {'status': 'deleted'});
+// insertMany sends one request per row (not atomic).
+await orbitnest.database.insertMany('users', [{'name': 'A'}, {'name': 'B'}]);
+// updateMany / deleteMany hit every row matching ALL filters (column = value).
+final upd = await orbitnest.database.updateMany('users', {'tier': 'pro'}, filters: {'plan': 'paid'});
+final del = await orbitnest.database.deleteMany('posts', filters: {'author_id': 12});
+print(del.count); // rows deleted
 ```
 
 ### Vector search (pgvector)
@@ -250,11 +281,15 @@ final matches = await orbitnest.database.vectorSearch(
 
 ### Raw SQL
 
+Placeholders are `$1`, `$2`, … The anon key (with or without a signed-in user) may run `SELECT` and `INSERT`.
+
 ```dart
 final result = await orbitnest.database.sql(
-  'SELECT name, COUNT(*) FROM posts GROUP BY name ORDER BY count DESC LIMIT ?',
+  r'SELECT name, COUNT(*) FROM posts GROUP BY name ORDER BY count DESC LIMIT $1',
   parameters: [10],
 );
+print(result.data);  // rows
+print(result.count); // rows affected
 ```
 
 ## Storage
@@ -286,7 +321,7 @@ channel
     event: PgEvent.insert,
     table: 'messages',
     filter: RealtimeFilter(column: 'room_id', op: 'eq', value: '42'),
-    callback: (payload) => print('new message: ${payload.newRecord}'),
+    callback: (payload) => print('new message: ${payload.newRow}'),
   )
   .onBroadcast(event: 'typing', callback: (p) => print(p.payload))
   .onPresenceSync((state) => print('online: ${state.keys}'));
@@ -298,6 +333,8 @@ await channel.send(event: 'typing', payload: {'user': 'jane'});
 await channel.unsubscribe();
 await orbitnest.realtime.dispose();
 ```
+
+When a user is signed in the socket carries their access token, so row events respect RLS for that user (anonymous sockets only see rows visible to `anon`). The socket reconnects automatically on sign-in / sign-out. `DELETE` events and tables without a primary key are not delivered to client sockets. Server errors (for example `not_subscribed`, `limit_exceeded`) arrive on `channel.events` as `RealtimeErrorEvent`.
 
 ## Edge functions
 
@@ -320,44 +357,26 @@ await orbitnest.functions.delete('session');
 await orbitnest.function('send-email', params: {'to': 'user@example.com'});
 ```
 
-## Background jobs
-
-Trigger and inspect scheduled server-side jobs. (Job authoring is an admin operation.)
+## Analytics
 
 ```dart
-await orbitnest.jobs.trigger('nightly-report');
-final runs = await orbitnest.jobs.getRuns('nightly-report', limit: 20);
-final all = await orbitnest.jobs.list();
+orbitnest.analytics.identify('user-123');
+orbitnest.analytics.track('purchase', properties: {'amount': 9.99});
+orbitnest.analytics.screen('Home');
+orbitnest.analytics.crash(error, stackTrace: stackTrace);
 ```
 
-## Migrations
-
-The SDK never runs migrations on-device — it triggers server-side runs and reads their status, which is useful for in-app admin or diagnostics screens.
-
-```dart
-final result = await orbitnest.migrations.run();      // apply all pending
-final status = await orbitnest.migrations.status();   // applied / pending / failed
-
-// MigrationLogController drives a live log view:
-final controller = MigrationLogController(orbitnest.migrations);
-await controller.refreshStatus();
-await controller.runMigrations();
-print(controller.logs);
-```
+Events are batched and sent every few seconds; `dispose()` flushes the queue.
 
 ## Reactive state with BLoC
 
-Every sub-API also exposes a state stream, and the underlying BLoCs are available for `flutter_bloc` integration. Use these only when you want UI that reacts to state automatically — the `async`/`await` API above covers most apps.
+Auth exposes a state stream for UI that reacts automatically — the `async`/`await` API above covers most apps.
 
 ```dart
-orbitnest.auth.onAuthStateChange.listen((state) { /* ... */ });
-orbitnest.database.onStateChange.listen((state) { /* ... */ });
-
-// Direct BLoC access for BlocProvider / BlocBuilder:
-orbitnest.authBloc;
-orbitnest.databaseBloc;
-orbitnest.functionsBloc;
+orbitnest.auth.onAuthStateChange.listen((state) { /* AuthAuthenticatedState, AuthUnauthenticatedState, ... */ });
 ```
+
+The BLoC classes (`AuthBloc`, `DatabaseBloc`, `FunctionsBloc`) are exported for advanced setups that build their own. The `orbitnest.database` methods call the API directly, so `orbitnest.database.onStateChange` only reflects events you dispatch to a `DatabaseBloc` yourself.
 
 ## Error handling
 
@@ -375,11 +394,11 @@ try {
 }
 ```
 
-Transient network failures (timeouts, connection errors, and `408`/`429`/`5xx` responses) are retried automatically with exponential backoff. Logs redact tokens, keys, and other sensitive fields in both debug and release builds.
+Transient network failures (timeouts, connection errors, and `408`/`429`/`5xx` responses) are retried automatically with exponential backoff (file uploads are not retried). Logs redact tokens, keys, and other sensitive fields in both debug and release builds.
 
 ## Migrating from Supabase
 
-The query builder and client shape mirror `supabase_flutter`, so most data code is unchanged.
+The query builder and client shape follow `supabase_flutter`. Simple filters, ordering and paging carry over; see [Database](#database) for what the OrbitNest data API does not support (upsert, `or`/`and`, JSON/array/range filters, embedded selects).
 
 ```dart
 // Before
@@ -390,7 +409,7 @@ final db = Supabase.instance.client;
 await EnvConfig.initialize();
 final db = OrbitNestClient.create();
 
-// Identical query syntax:
+// Similar query syntax (end the chain with execute()):
 final rows = await db.from('users').select('*').eq('status', 'active').execute();
 ```
 
@@ -399,15 +418,16 @@ final rows = await db.from('users').select('*').eq('status', 'active').execute()
 | Area | Entry point | Notes |
 |------|-------------|-------|
 | Auth | `orbitnest.auth` | password, email/SMS OTP, MFA (TOTP), passkeys, sessions |
-| Database | `orbitnest.from(table)`, `orbitnest.database` | query builder, CRUD, bulk, pgvector, raw SQL |
+| Database | `orbitnest.from(table)`, `orbitnest.database` | query builder, CRUD, pgvector, raw SQL |
 | Storage | `orbitnest.storage.from(bucket)` | upload, download, list, remove, public URLs + transforms |
 | Realtime | `orbitnest.realtime.channel(name)` | Postgres changes, broadcast, presence |
 | Functions | `orbitnest.functions` | invoke only (`invoke`, `call`, `get`/`post`/`put`/`delete`) |
-| Jobs | `orbitnest.jobs` | `trigger`, `getRuns`, `list`, `get` |
-| Migrations | `orbitnest.migrations` | `run`, `status` (server-side) |
+| Analytics | `orbitnest.analytics` | `identify`, `track`, `screen`, `crash` |
 | Config | `EnvConfig` | `.env` loading, runtime settings |
 
-Call `orbitnest.dispose()` when the client is no longer needed to release the HTTP client and any open realtime connection.
+Call `orbitnest.dispose()` when the client is no longer needed to flush analytics and release the HTTP client and any open realtime connection.
+
+`orbitnest.jobs` and `orbitnest.migrations` are deprecated: those routes need the Studio admin API (jobs) or do not exist (migrations), so they cannot work from an app. Use Studio or the OrbitNest CLI.
 
 ## License
 

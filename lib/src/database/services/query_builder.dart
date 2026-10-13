@@ -1,223 +1,108 @@
 import '../models/postgrest_response.dart';
 import 'database_service.dart';
-import '../bloc/database_bloc.dart';
 
-/// Supabase-compatible PostgreSQL query builder
+/// Supabase-style query builder over the OrbitNest data API.
+///
+/// Filters must be added before the terminal call (`execute`, `insert`,
+/// `update`, `upsert`, `delete`). The API supports `eq`, `neq`, `gt`, `gte`,
+/// `lt`, `lte`, `like`, `ilike`, `in` and `is`, one sort column, and pages of
+/// at most 100 rows. Unsupported filters throw [UnsupportedError] instead of
+/// being silently ignored. `update()`/`delete()` accept equality filters only.
 class PostgrestQueryBuilder<T> {
-  final DatabaseService? _databaseService;
-  // ignore: unused_field
-  final DatabaseBloc? _databaseBloc;
+  final DatabaseService _databaseService;
   final String _table;
-  // ignore: unused_field
-  final String? _projectSlug;
-  String? _select;
-  final List<String> _filters = [];
-  final List<String> _orders = [];
+  String _select = '*';
+  final List<({String column, String op, Object? value})> _filters = [];
+  String? _orderBy;
+  bool _ascending = true;
   int? _limit;
   int? _offset;
 
-  // Legacy constructor for direct service use
-  PostgrestQueryBuilder(this._databaseService, this._table)
-      : _databaseBloc = null,
-        _projectSlug = null;
+  PostgrestQueryBuilder(this._databaseService, this._table);
 
-  // New constructor for BLoC-based use
-  PostgrestQueryBuilder.withBloc({
-    required DatabaseBloc databaseBloc,
-    required String table,
-    required String projectSlug,
-  })  : _databaseBloc = databaseBloc,
-        _table = table,
-        _projectSlug = projectSlug,
-        _databaseService = null;
+  PostgrestQueryBuilder<T> _add(String column, String op, Object? value) {
+    DatabaseService.encodeFilter(column, op, value); // validate now, not at execute()
+    _filters.add((column: column, op: op, value: value));
+    return this;
+  }
 
-  /// Select columns
+  static Never _unsupported(String method) => throw UnsupportedError(
+      '$method() is not supported by the OrbitNest data API. '
+      'Use eq/neq/gt/gte/lt/lte/like/ilike/inFilter/isFilter, or database.sql().');
+
+  /// Select columns (plain column list, applied client-side; `*` for all).
   PostgrestQueryBuilder<T> select([String? columns]) {
     _select = columns ?? '*';
     return this;
   }
 
-  /// Equal filter
-  PostgrestQueryBuilder<T> eq(String column, dynamic value) {
-    _filters.add('$column=eq.$value');
-    return this;
-  }
+  PostgrestQueryBuilder<T> eq(String column, dynamic value) => _add(column, 'eq', value);
+  PostgrestQueryBuilder<T> neq(String column, dynamic value) => _add(column, 'neq', value);
+  PostgrestQueryBuilder<T> gt(String column, dynamic value) => _add(column, 'gt', value);
+  PostgrestQueryBuilder<T> gte(String column, dynamic value) => _add(column, 'gte', value);
+  PostgrestQueryBuilder<T> lt(String column, dynamic value) => _add(column, 'lt', value);
+  PostgrestQueryBuilder<T> lte(String column, dynamic value) => _add(column, 'lte', value);
 
-  /// Not equal filter
-  PostgrestQueryBuilder<T> neq(String column, dynamic value) {
-    _filters.add('$column=neq.$value');
-    return this;
-  }
-
-  /// Greater than filter
-  PostgrestQueryBuilder<T> gt(String column, dynamic value) {
-    _filters.add('$column=gt.$value');
-    return this;
-  }
-
-  /// Greater than or equal filter
-  PostgrestQueryBuilder<T> gte(String column, dynamic value) {
-    _filters.add('$column=gte.$value');
-    return this;
-  }
-
-  /// Less than filter
-  PostgrestQueryBuilder<T> lt(String column, dynamic value) {
-    _filters.add('$column=lt.$value');
-    return this;
-  }
-
-  /// Less than or equal filter
-  PostgrestQueryBuilder<T> lte(String column, dynamic value) {
-    _filters.add('$column=lte.$value');
-    return this;
-  }
-
-  /// Like filter (case sensitive)
-  PostgrestQueryBuilder<T> like(String column, String pattern) {
-    _filters.add('$column=like.$pattern');
-    return this;
-  }
+  /// Like filter (case sensitive, `%` wildcards)
+  PostgrestQueryBuilder<T> like(String column, String pattern) => _add(column, 'like', pattern);
 
   /// iLike filter (case insensitive)
-  PostgrestQueryBuilder<T> ilike(String column, String pattern) {
-    _filters.add('$column=ilike.$pattern');
-    return this;
-  }
+  PostgrestQueryBuilder<T> ilike(String column, String pattern) => _add(column, 'ilike', pattern);
 
-  /// Is filter (for null, true, false)
-  PostgrestQueryBuilder<T> isFilter(String column, dynamic value) {
-    _filters.add('$column=is.$value');
-    return this;
-  }
+  /// Is filter — `null`, `true` or `false` only
+  PostgrestQueryBuilder<T> isFilter(String column, dynamic value) =>
+      _add(column, 'is', value ?? 'null');
 
   /// In filter
-  PostgrestQueryBuilder<T> inFilter(String column, List<dynamic> values) {
-    _filters.add('$column=in.(${values.join(',')})');
-    return this;
-  }
+  PostgrestQueryBuilder<T> inFilter(String column, List<dynamic> values) =>
+      _add(column, 'in', values);
 
-  /// Contains filter (for arrays and jsonb)
-  PostgrestQueryBuilder<T> contains(String column, dynamic value) {
-    _filters.add('$column=cs.$value');
-    return this;
-  }
-
-  /// Contained by filter (for arrays and jsonb)
-  PostgrestQueryBuilder<T> containedBy(String column, dynamic value) {
-    _filters.add('$column=cd.$value');
-    return this;
-  }
-
-  /// Range less than filter
-  PostgrestQueryBuilder<T> rangeLt(String column, String range) {
-    _filters.add('$column=sl.$range');
-    return this;
-  }
-
-  /// Range greater than filter
-  PostgrestQueryBuilder<T> rangeGt(String column, String range) {
-    _filters.add('$column=sr.$range');
-    return this;
-  }
-
-  /// Range greater than or equal filter
-  PostgrestQueryBuilder<T> rangeGte(String column, String range) {
-    _filters.add('$column=nxl.$range');
-    return this;
-  }
-
-  /// Range less than or equal filter
-  PostgrestQueryBuilder<T> rangeLte(String column, String range) {
-    _filters.add('$column=nxr.$range');
-    return this;
-  }
-
-  /// Range adjacent filter
-  PostgrestQueryBuilder<T> rangeAdjacent(String column, String range) {
-    _filters.add('$column=adj.$range');
-    return this;
-  }
-
-  /// Overlaps filter (for arrays and ranges)
-  PostgrestQueryBuilder<T> overlaps(String column, dynamic value) {
-    _filters.add('$column=ov.$value');
-    return this;
-  }
-
-  /// Full text search filter
-  PostgrestQueryBuilder<T> textSearch(
-    String column,
-    String query, {
-    String? config,
-    String? type,
-  }) {
-    var filter = '$column=';
-    if (type != null) {
-      filter += '${type}fts';
-    } else {
-      filter += 'fts';
-    }
-    if (config != null) {
-      filter += '($config).';
-    } else {
-      filter += '.';
-    }
-    filter += query;
-    _filters.add(filter);
-    return this;
-  }
-
-  /// Match multiple columns (AND)
+  /// Match multiple columns (AND of equality filters)
   PostgrestQueryBuilder<T> match(Map<String, dynamic> query) {
-    for (final entry in query.entries) {
-      _filters.add('${entry.key}=eq.${entry.value}');
-    }
+    query.forEach((k, v) => _add(k, 'eq', v));
     return this;
   }
 
-  /// Not filter
+  /// Negation — only `not(column, 'eq', value)` (= `neq`) is supported.
   PostgrestQueryBuilder<T> not(String column, String operator, dynamic value) {
-    _filters.add('$column=not.$operator.$value');
-    return this;
+    if (operator == 'eq') return _add(column, 'neq', value);
+    _unsupported('not($operator)');
   }
 
-  /// Or filter
-  PostgrestQueryBuilder<T> or(String filters) {
-    _filters.add('or=($filters)');
-    return this;
-  }
+  PostgrestQueryBuilder<T> contains(String column, dynamic value) => _unsupported('contains');
+  PostgrestQueryBuilder<T> containedBy(String column, dynamic value) => _unsupported('containedBy');
+  PostgrestQueryBuilder<T> rangeLt(String column, String range) => _unsupported('rangeLt');
+  PostgrestQueryBuilder<T> rangeGt(String column, String range) => _unsupported('rangeGt');
+  PostgrestQueryBuilder<T> rangeGte(String column, String range) => _unsupported('rangeGte');
+  PostgrestQueryBuilder<T> rangeLte(String column, String range) => _unsupported('rangeLte');
+  PostgrestQueryBuilder<T> rangeAdjacent(String column, String range) => _unsupported('rangeAdjacent');
+  PostgrestQueryBuilder<T> overlaps(String column, dynamic value) => _unsupported('overlaps');
+  PostgrestQueryBuilder<T> textSearch(String column, String query, {String? config, String? type}) =>
+      _unsupported('textSearch');
+  PostgrestQueryBuilder<T> or(String filters) => _unsupported('or');
+  PostgrestQueryBuilder<T> and(String filters) => _unsupported('and');
 
-  /// And filter
-  PostgrestQueryBuilder<T> and(String filters) {
-    _filters.add('and=($filters)');
-    return this;
-  }
-
-  /// Order by
+  /// Order by one column. [nullsFirst] is ignored (Postgres default ordering).
   PostgrestQueryBuilder<T> order(
     String column, {
     bool ascending = true,
     bool nullsFirst = false,
   }) {
-    var orderStr = column;
-    if (!ascending) orderStr += '.desc';
-    if (nullsFirst) {
-      orderStr += '.nullsfirst';
-    } else {
-      orderStr += '.nullslast';
+    if (_orderBy != null) {
+      throw UnsupportedError('The OrbitNest data API sorts by one column only');
     }
-    _orders.add(orderStr);
+    _orderBy = column;
+    _ascending = ascending;
     return this;
   }
 
-  /// Limit the number of rows
+  /// Limit the number of rows (the server caps a page at 100)
   PostgrestQueryBuilder<T> limit(int count, {int? foreignTable}) {
     _limit = count;
     return this;
   }
 
-  /// Range of rows (pagination)
+  /// Rows [from]..[to] inclusive (0-based)
   PostgrestQueryBuilder<T> range(int from, int to, {int? foreignTable}) {
     _offset = from;
     _limit = to - from + 1;
@@ -225,122 +110,76 @@ class PostgrestQueryBuilder<T> {
   }
 
   /// Single row (limit 1)
-  PostgrestQueryBuilder<T> single() {
-    _limit = 1;
-    return this;
-  }
+  PostgrestQueryBuilder<T> single() => limit(1);
 
-  /// Maybe single row (limit 1, but doesn't throw if no results)
-  PostgrestQueryBuilder<T> maybeSingle() {
-    _limit = 1;
-    return this;
-  }
+  /// Maybe single row (limit 1, no error when empty)
+  PostgrestQueryBuilder<T> maybeSingle() => limit(1);
 
-  /// Execute the query
+  /// Run the select.
   Future<PostgrestResponse<Map<String, dynamic>>> execute() async {
-    if (_databaseService != null) {
-      return await _databaseService!.executeQuery(
-        table: _table,
-        select: _select ?? '*',
-        filters: _filters.isNotEmpty ? _filters : null,
-        orders: _orders.isNotEmpty ? _orders : null,
-        limit: _limit,
-        offset: _offset,
-      );
-    } else {
-      throw UnsupportedError(
-          'Query builder requires DatabaseService for execution. Use OrbitNestClient.from(table) instead of creating query builder directly.');
-    }
+    return _databaseService.executeQuery(
+      table: _table,
+      select: _select,
+      filters: _filters.map((f) => DatabaseService.encodeFilter(f.column, f.op, f.value)).toList(),
+      orderBy: _orderBy,
+      ascending: _ascending,
+      limit: _limit,
+      offset: _offset,
+    );
   }
 
-  /// Insert data
+  /// Insert one row (Map) or several rows (List of Maps, one request each).
+  /// [upsert], [onConflict] and [ignoreDuplicates] are not supported by the
+  /// API: `upsert: true` throws [UnsupportedError].
   Future<PostgrestResponse<Map<String, dynamic>>> insert(
     dynamic values, {
     bool upsert = false,
     String? onConflict,
     bool ignoreDuplicates = false,
   }) async {
-    Map<String, dynamic> data;
+    if (upsert || ignoreDuplicates) throw DatabaseService.upsertUnsupported();
     if (values is Map<String, dynamic>) {
-      data = values;
-    } else if (values is List) {
-      // For bulk insert, take the first item for single insert
-      if (values.isNotEmpty && values.first is Map<String, dynamic>) {
-        data = values.first;
-      } else {
-        throw ArgumentError('Invalid insert data format');
-      }
-    } else {
-      throw ArgumentError('Insert values must be Map<String, dynamic> or List');
+      return _databaseService.insert(table: _table, values: values);
     }
-
-    if (_databaseService != null) {
-      return await _databaseService!.insert(
-        table: _table,
-        values: data,
-        upsert: upsert,
-        onConflict: onConflict,
-        ignoreDuplicates: ignoreDuplicates,
-      );
-    } else {
-      throw UnsupportedError(
-          'Query builder requires DatabaseService. Use OrbitNestClient.from(table) instead.');
+    if (values is List && values.every((v) => v is Map<String, dynamic>)) {
+      return _databaseService.bulkInsert(
+          table: _table, values: values.cast<Map<String, dynamic>>());
     }
+    throw ArgumentError('Insert values must be a Map<String, dynamic> or a List of them');
   }
 
-  /// Update data
-  Future<PostgrestResponse<Map<String, dynamic>>> update(
-    Map<String, dynamic> values,
-  ) async {
-    if (_databaseService != null) {
-      return await _databaseService!.update(
-        table: _table,
-        values: values,
-        filters: _filters.isNotEmpty ? _filters : null,
-      );
-    } else {
-      throw UnsupportedError(
-          'Query builder requires DatabaseService. Use OrbitNestClient.from(table) instead.');
-    }
+  /// Update the rows matched by the equality filters added before this call.
+  Future<PostgrestResponse<Map<String, dynamic>>> update(Map<String, dynamic> values) async {
+    return _databaseService.updateWhere(table: _table, values: values, match: _equalityMatch('update'));
   }
 
-  /// Upsert data (insert or update)
+  /// Not supported by the API — always throws [UnsupportedError].
   Future<PostgrestResponse<Map<String, dynamic>>> upsert(
     dynamic values, {
     String? onConflict,
     bool ignoreDuplicates = false,
   }) async {
-    return await insert(
-      values,
-      upsert: true,
-      onConflict: onConflict,
-      ignoreDuplicates: ignoreDuplicates,
-    );
+    throw DatabaseService.upsertUnsupported();
   }
 
-  /// Delete data
+  /// Delete the rows matched by the equality filters added before this call.
   Future<PostgrestResponse<Map<String, dynamic>>> delete() async {
-    if (_databaseService != null) {
-      return await _databaseService!.delete(
-        table: _table,
-        filters: _filters.isNotEmpty ? _filters : null,
-      );
-    } else {
-      throw UnsupportedError(
-          'Query builder requires DatabaseService. Use OrbitNestClient.from(table) instead.');
+    return _databaseService.deleteWhere(table: _table, match: _equalityMatch('delete'));
+  }
+
+  Map<String, dynamic> _equalityMatch(String action) {
+    if (_filters.any((f) => f.op != 'eq')) {
+      throw UnsupportedError('$action() supports equality filters (eq/match) only');
     }
+    return {for (final f in _filters) f.column: f.value};
   }
 }
 
 /// Extension to add convenient methods
 extension PostgrestQueryBuilderX<T> on PostgrestQueryBuilder<T> {
-  /// Alias for isFilter with null
-  PostgrestQueryBuilder<T> isNull(String column) {
-    return isFilter(column, 'null');
-  }
+  /// `column IS NULL`
+  PostgrestQueryBuilder<T> isNull(String column) => isFilter(column, 'null');
 
-  /// Alias for not null
-  PostgrestQueryBuilder<T> isNotNull(String column) {
-    return not(column, 'is', 'null');
-  }
+  /// Not supported by the API (no `IS NOT NULL` filter) — throws.
+  PostgrestQueryBuilder<T> isNotNull(String column) => not(column, 'is', 'null');
 }

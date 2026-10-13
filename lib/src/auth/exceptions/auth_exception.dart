@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import '../../client/interceptors/error_interceptor.dart';
 import '../../constants/error_codes.dart';
 
@@ -7,6 +8,7 @@ class AuthException extends OrbitNestException {
     super.message, {
     super.code,
     super.statusCode,
+    super.body,
     this.user,
   });
 
@@ -31,6 +33,26 @@ class AuthException extends OrbitNestException {
         error.message,
         code: error.code,
         statusCode: error.statusCode,
+        body: error.body,
+      );
+    }
+
+    // Dio wraps the OrbitNestException built by ErrorInterceptor; unwrap it so
+    // the HTTP status survives (the refresh path relies on it, B-sdk-flutter-08).
+    if (error is DioException) {
+      final inner = error.error;
+      if (inner is OrbitNestException) {
+        return AuthException.fromException(OrbitNestException(
+          inner.message,
+          code: inner.code,
+          statusCode: inner.statusCode ?? error.response?.statusCode,
+          body: inner.body,
+        ));
+      }
+      return AuthException(
+        error.message ?? error.toString(),
+        code: 'UNKNOWN_AUTH_ERROR',
+        statusCode: error.response?.statusCode,
       );
     }
 

@@ -22,9 +22,6 @@ class TokenManager {
   // Cache tokens in memory for faster access
   String? _cachedAccessToken;
   String? _cachedRefreshToken;
-  // Guards against re-entrant proactive refresh: the refresh HTTP call itself
-  // goes through onRequest → getAccessToken, and we must not recurse.
-  bool _isRefreshing = false;
   // Set while a sign-out is in flight. The /auth/signout request goes through
   // onRequest → getAccessToken; if the token is expired a proactive refresh
   // would add an event to the AuthBloc that is already blocked processing the
@@ -211,9 +208,10 @@ class TokenManager {
       // the /auth/signout call can still proceed.
       if (_isSigningOut) return _cachedAccessToken;
       // Return cached token only if it has not expired yet.
-      if (_cachedAccessToken != null) {
-        if (!isTokenExpired(_cachedAccessToken!)) {
-          return _cachedAccessToken;
+      final stale = _cachedAccessToken;
+      if (stale != null) {
+        if (!isTokenExpired(stale)) {
+          return stale;
         }
         _cachedAccessToken = null;
       }
@@ -223,24 +221,23 @@ class TokenManager {
         _cachedAccessToken = token;
         return token;
       }
-      // Both expired: refresh proactively so callers get a valid token without
-      // waiting for a 401, which the server often embeds in a 200 body (meaning
-      // onError never fires and the anon key gets sent as Bearer instead).
-      // _isRefreshing breaks the re-entrancy loop: the refresh HTTP call itself
-      // goes through onRequest → getAccessToken, and must not recurse here.
-      if (!_isRefreshing && _refreshCallback != null) {
-        _isRefreshing = true;
-        try {
-          final refreshed = await refreshSession();
-          if (refreshed) {
-            final newToken = await _secureStorage.read(key: OrbitNestConstants.accessTokenKey);
-            if (newToken != null && !isTokenExpired(newToken)) {
-              _cachedAccessToken = newToken;
-              return newToken;
-            }
+      // Both expired: refresh proactively so callers get a valid token. Every
+      // concurrent caller awaits the same de-duplicated refresh — returning
+      // null here would send the anon key and run the call as the anonymous
+      // role. (/auth/refresh skips onRequest, so this can't re-enter itself.)
+      if (_refreshCallback != null) {
+        final refreshed = await refreshSession();
+        if (refreshed) {
+          final newToken = _cachedAccessToken ??
+              await _secureStorage.read(key: OrbitNestConstants.accessTokenKey);
+          if (newToken != null && !isTokenExpired(newToken)) {
+            _cachedAccessToken = newToken;
+            return newToken;
           }
-        } finally {
-          _isRefreshing = false;
+        } else if (_lastRefreshFailedTransiently) {
+          // Offline / 5xx: keep sending the old token so the call fails with
+          // 401 instead of silently downgrading the signed-in user to anon.
+          return stale ?? token;
         }
       }
       return null;
@@ -398,27 +395,34 @@ class TokenManager {
     _refreshCallback = callback;
   }
 
+  /// True when the last [refreshSession] that returned false failed for a
+  /// transient reason (offline, timeout, 5xx) rather than the server rejecting
+  /// the refresh token. Callers must keep the stored session in that case.
+  bool get lastRefreshFailedTransiently => _lastRefreshFailedTransiently;
+  bool _lastRefreshFailedTransiently = false;
+
   /// Refresh session using the registered callback.
   /// If a refresh is already in progress, the caller awaits the same Future
   /// instead of firing a second HTTP request.
-  Future<bool> refreshSession() async {
-    if (_refreshCallback == null) {
-      return false;
-    }
+  ///
+  /// The callback returns false when the server rejected the refresh token and
+  /// throws on transient failures; both resolve to false here, and
+  /// [lastRefreshFailedTransiently] tells them apart.
+  Future<bool> refreshSession() {
+    if (_refreshCallback == null) return Future.value(false);
+    return _pendingRefresh ??=
+        _runRefresh().whenComplete(() => _pendingRefresh = null);
+  }
 
-    if (_pendingRefresh != null) {
-      return _pendingRefresh!;
-    }
-
-    _pendingRefresh = _refreshCallback!();
+  Future<bool> _runRefresh() async {
     try {
-      final result = await _pendingRefresh!;
-      return result;
+      final ok = await _refreshCallback!();
+      _lastRefreshFailedTransiently = false;
+      return ok;
     } catch (e) {
-      OrbitNestLogger.error('Token refresh failed', e);
+      OrbitNestLogger.error('Token refresh failed (transient)', e);
+      _lastRefreshFailedTransiently = true;
       return false;
-    } finally {
-      _pendingRefresh = null;
     }
   }
 
