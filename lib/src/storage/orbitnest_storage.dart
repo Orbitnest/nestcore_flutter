@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import '../client/http_client.dart';
+import 'exceptions/storage_exception.dart';
 
 /// On-the-fly image transform options for [StorageBucket.getPublicUrl].
 class StorageTransform {
@@ -66,6 +67,15 @@ class StorageBucket {
 
   String get _basePath => '/api/project/$_projectSlug/storage/$_bucket';
 
+  /// Every request failure surfaces as a [StorageException].
+  static Future<T> _guard<T>(Future<T> Function() request) async {
+    try {
+      return await request();
+    } catch (e) {
+      throw StorageException.fromException(e);
+    }
+  }
+
   static String _encodePath(String path) =>
       path.split('/').where((s) => s.isNotEmpty).map(Uri.encodeComponent).join('/');
 
@@ -75,7 +85,7 @@ class StorageBucket {
     required Uint8List bytes,
     String? contentType,
     bool upsert = false,
-  }) async {
+  }) => _guard(() async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(
         bytes,
@@ -89,19 +99,19 @@ class StorageBucket {
     final data = res.data;
     if (data is Map && data['data'] != null) return Map<String, dynamic>.from(data['data'] as Map);
     return data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-  }
+  });
 
   /// Download a file's raw bytes.
-  Future<Uint8List> download(String path) async {
+  Future<Uint8List> download(String path) => _guard(() async {
     final res = await _httpClient.get(
       '$_basePath/download/${_encodePath(path)}',
       options: Options(responseType: ResponseType.bytes),
     );
     return Uint8List.fromList(List<int>.from(res.data as List));
-  }
+  });
 
   /// List files in the bucket (optionally under [prefix]).
-  Future<List<dynamic>> list({String? prefix}) async {
+  Future<List<dynamic>> list({String? prefix}) => _guard(() async {
     final res = await _httpClient.get(
       _basePath,
       queryParameters: {if (prefix != null && prefix.isNotEmpty) 'prefix': prefix},
@@ -109,16 +119,16 @@ class StorageBucket {
     final data = res.data;
     if (data is List) return List<dynamic>.from(data);
     if (data is Map && data['data'] is List) return List<dynamic>.from(data['data'] as List);
-    return const [];
-  }
+    return const <dynamic>[];
+  });
 
   /// Delete one or more files by path. Returns `{ deleted: [...], errors: [...] }`.
-  Future<Map<String, dynamic>> remove(List<String> paths) async {
+  Future<Map<String, dynamic>> remove(List<String> paths) => _guard(() async {
     final res = await _httpClient.delete(_basePath, data: {'paths': paths});
     final data = res.data;
     if (data is Map && data['data'] != null) return Map<String, dynamic>.from(data['data'] as Map);
     return data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-  }
+  });
 
   /// Build a public URL for a file. Pass [transform] for an on-the-fly image
   /// rendition (resize / format / quality). Access is governed by the bucket's
@@ -133,8 +143,8 @@ class StorageBucket {
   }
 
   /// Create this bucket if it doesn't already exist.
-  Future<Map<String, dynamic>> createBucket() async {
+  Future<Map<String, dynamic>> createBucket() => _guard(() async {
     final res = await _httpClient.post('$_basePath/create');
     return res.data is Map ? Map<String, dynamic>.from(res.data as Map) : <String, dynamic>{};
-  }
+  });
 }

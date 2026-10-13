@@ -91,6 +91,11 @@
   `body` with the parsed error JSON, e.g. `QUOTA_EXCEEDED`'s
   `quota`/`plan`/`limit`/`usage`. `FunctionException` now keeps the API's
   `code` and `message` (it reported `UNKNOWN_FUNCTION_ERROR`).
+- **Storage throws `StorageException`.** Every `storage.from(bucket)` request
+  method (`upload`, `download`, `list`, `remove`, `createBucket`) throws a
+  `StorageException` (an `OrbitNestException`) with the API's `statusCode`,
+  `code`, `message` and `body` — e.g. 402 `QUOTA_EXCEEDED`, 403, 404 — instead
+  of a raw `DioException`. `download` errors are decoded too.
 - 402/403/429 (`QUOTA_EXCEEDED`, `PLAN_REQUIRED`, `MFA_ENROLLMENT_REQUIRED`,
   `SMS_RATE_LIMITED`, `SHARED_EMAIL_RATE_LIMITED`, …) never refresh or end the
   session. A 429 that carries a `code` is not retried.

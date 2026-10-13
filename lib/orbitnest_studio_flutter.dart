@@ -42,6 +42,7 @@ export 'src/realtime/orbitnest_realtime.dart';
 
 // Storage — upload/download/list/remove + public URLs with image transforms
 export 'src/storage/orbitnest_storage.dart';
+export 'src/storage/exceptions/storage_exception.dart';
 
 // Types and utilities
 export 'src/types/json_types.dart';

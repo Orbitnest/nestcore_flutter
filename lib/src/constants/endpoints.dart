@@ -113,10 +113,6 @@ class Endpoints {
       '/api/projects/$projectId/auth/admin/users/$userId';
   static String projectAdminStats(String projectId) =>
       '/api/projects/$projectId/auth/admin/stats';
-  static String projectAdminConfig(String projectId) =>
-      '/api/projects/$projectId/auth/admin/config';
-  static String projectAdminUpdateConfig(String projectId) =>
-      '/api/projects/$projectId/auth/admin/config';
 
   // Edge Functions
   static String projectFunctions(String projectId) =>
