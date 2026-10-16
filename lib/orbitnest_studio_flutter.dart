@@ -44,6 +44,9 @@ export 'src/realtime/orbitnest_realtime.dart';
 export 'src/storage/orbitnest_storage.dart';
 export 'src/storage/exceptions/storage_exception.dart';
 
+// AI Gateway — chat, streaming, tool calls and embeddings
+export 'src/ai/orbitnest_ai.dart';
+
 // Types and utilities
 export 'src/types/json_types.dart';
 export 'src/types/response_types.dart';

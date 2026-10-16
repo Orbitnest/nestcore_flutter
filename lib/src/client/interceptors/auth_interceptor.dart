@@ -1,6 +1,18 @@
 import 'package:dio/dio.dart';
 import '../../auth/services/token_manager.dart';
 
+/// Credentials for a project request: the anon key identifies the project
+/// (`apikey`); the Bearer is the user's access token when signed in, else the
+/// anon key.
+Future<Map<String, String>> projectAuthHeaders(TokenManager tokenManager) async {
+  final apiKey = await tokenManager.getApiKey();
+  final token = await tokenManager.getAccessToken() ?? apiKey;
+  return {
+    if (apiKey != null) 'apikey': apiKey,
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
+}
+
 /// Interceptor for handling authentication tokens
 class AuthInterceptor extends Interceptor {
   final TokenManager _tokenManager;
@@ -16,16 +28,7 @@ class AuthInterceptor extends Interceptor {
         return;
       }
 
-      // Every other endpoint: the anon key identifies the project (`apikey`);
-      // the Bearer is the user's access token when signed in, else the anon key.
-      final apiKey = await _tokenManager.getApiKey();
-      if (apiKey != null) options.headers['apikey'] = apiKey;
-      final token = await _tokenManager.getAccessToken();
-      if (token != null) {
-        options.headers['Authorization'] = 'Bearer $token';
-      } else if (apiKey != null) {
-        options.headers['Authorization'] = 'Bearer $apiKey';
-      }
+      options.headers.addAll(await projectAuthHeaders(_tokenManager));
 
       handler.next(options);
     } catch (_) {

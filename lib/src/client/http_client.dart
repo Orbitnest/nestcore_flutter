@@ -55,6 +55,10 @@ class OrbitNestHttpClient {
     ]);
   }
 
+  /// The credentials [AuthInterceptor] adds, for a request made outside Dio
+  /// (an abortable stream). That path gets no 401 refresh-and-retry.
+  Future<Map<String, String>> authHeaders() => projectAuthHeaders(_tokenManager);
+
   /// Get request
   Future<Response<T>> get<T>(
     String path, {

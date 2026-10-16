@@ -1,5 +1,9 @@
 ## [1.7.0]
 
+### Added — AI gateway
+- `client.ai`: `chat`, `chatStream` (a `Stream<AiStreamEvent>`: text deltas, tool calls, done or error), `embed` (768-dim vectors) and `models`, through the project's own provider keys. Tool calling and image inputs (`AiContentPart.image` with a data URL). Cancelling the stream subscription closes the connection so the server stops generating.
+- Billed AI requests are never retried by the retry interceptor (`extra: {'noRetry': true}`).
+
 ### Fixed — Database
 - **`deleteMany` no longer deletes unrelated rows.** It sent the filter
   *values* as ids (`deleteMany('posts', filters: {'author_id': 12})` ran

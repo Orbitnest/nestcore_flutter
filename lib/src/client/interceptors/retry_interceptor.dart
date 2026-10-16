@@ -83,6 +83,12 @@ class RetryInterceptor extends Interceptor {
       return false;
     }
 
+    // Billed, non-idempotent calls (AI gateway): a resend after a timeout or a
+    // 5xx can pay for the same reply twice.
+    if (error.requestOptions.extra['noRetry'] == true) {
+      return false;
+    }
+
     // Retry on timeout errors
     if (retryPolicy.retryOnTimeout &&
         (error.type == DioExceptionType.connectionTimeout ||

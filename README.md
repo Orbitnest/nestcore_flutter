@@ -14,6 +14,7 @@ The client is built on the BLoC pattern internally, but you don't need to know B
 - [Storage](#storage)
 - [Realtime](#realtime)
 - [Edge functions](#edge-functions)
+- [AI](#ai)
 - [Analytics](#analytics)
 - [Reactive state with BLoC](#reactive-state-with-bloc)
 - [Error handling](#error-handling)
@@ -356,6 +357,27 @@ await orbitnest.functions.delete('session');
 // Shorthand on the client:
 await orbitnest.function('send-email', params: {'to': 'user@example.com'});
 ```
+
+## AI
+
+Chat, streaming, tool calls and embeddings through the project's own provider keys (Studio → Project Settings → AI). Calls need a signed-in user.
+
+```dart
+final r = await orbitnest.ai.chat(messages: [AiMessage.user('Summarise my last order')]);
+
+await for (final ev in orbitnest.ai.chatStream(messages: history)) {
+  switch (ev) {
+    case AiTextDelta(:final text): setState(() => reply += text);
+    case AiToolCallEvent(:final call): pending.add(call);
+    case AiStreamDone(): break;
+    case AiStreamError(:final code, :final message): showError('$code $message');
+  }
+}
+
+final e = await orbitnest.ai.embed(['first', 'second']); // 768 dimensions
+```
+
+Tool calls: answer each `r.toolCalls` entry with `AiMessage.toolResult(call, result)` after appending `AiMessage.fromResult(r)` to the history, then chat again. Cancelling the stream subscription stops the reply at the server. Errors from `chat`/`embed` are `AiException` (`code`, `statusCode`, `body`).
 
 ## Analytics
 

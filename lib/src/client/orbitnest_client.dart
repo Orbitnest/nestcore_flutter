@@ -16,6 +16,7 @@ import '../edge_functions/bloc/functions_bloc.dart';
 import '../edge_functions/repositories/functions_repository.dart';
 import '../edge_functions/services/functions_service.dart';
 import '../edge_functions/orbitnest_functions.dart';
+import '../ai/orbitnest_ai.dart';
 import '../jobs/services/jobs_service.dart';
 import '../migrations/services/migration_service.dart';
 import '../realtime/orbitnest_realtime.dart';
@@ -56,6 +57,7 @@ class OrbitNestClient {
   late final OrbitNestRealtime _realtime;
   late final OrbitNestAnalytics _analytics;
   late final OrbitNestStorage _storage;
+  late final OrbitNestAi _ai;
   late final StreamSubscription<AuthState> _authSubscription;
 
   OrbitNestClient._({
@@ -198,6 +200,7 @@ class OrbitNestClient {
       baseUrl: _baseUrl,
       projectSlug: _projectSlug,
     );
+    _ai = OrbitNestAi(httpClient: _httpClient, projectSlug: _projectSlug);
   }
 
   /// Get the authentication API (simplified interface)
@@ -224,6 +227,10 @@ class OrbitNestClient {
   /// Get the storage API — `client.storage.from('bucket').upload(...)`,
   /// `download`, `list`, `remove`, and `getPublicUrl` (with image transforms).
   OrbitNestStorage get storage => _storage;
+
+  /// AI Gateway — `client.ai.chat(...)`, `chatStream(...)`, `embed(...)`,
+  /// `models()` with the project's own provider keys.
+  OrbitNestAi get ai => _ai;
 
   /// Convenience shortcut: create a realtime channel directly on the client.
   RealtimeChannel channel(String name) => _realtime.channel(name);
