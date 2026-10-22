@@ -63,4 +63,9 @@ class ErrorCodes {
   static const String missingRequiredField = 'MISSING_REQUIRED_FIELD';
   static const String invalidEmail = 'INVALID_EMAIL';
   static const String invalidUuid = 'INVALID_UUID';
+
+  // Project auth limits (429), set per project in Studio → Settings → Auth Security
+  static const String otpRateLimited = 'OTP_RATE_LIMITED'; // too many wrong codes
+  static const String otpRequestLimit = 'OTP_REQUEST_LIMIT'; // too many codes requested for one email
+  static const String accountLocked = 'ACCOUNT_LOCKED'; // too many wrong passwords
 }

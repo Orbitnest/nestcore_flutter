@@ -294,7 +294,7 @@ class AuthService {
 
   /// Update password with reset token.
   ///
-  /// API expects `{ email, code, new_password }`. `token` is the 4-digit OTP
+  /// API expects `{ email, code, new_password }`. `token` is the emailed code (6 digits by default)
   /// from the recovery email — named `token` on the SDK surface for symmetry
   /// with other auth providers.
   Future<AuthResponse> updatePassword({

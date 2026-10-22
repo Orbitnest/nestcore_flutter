@@ -157,6 +157,18 @@ class AuthException extends OrbitNestException {
     );
   }
 
+  /// Too many wrong codes: codes are invalidated for a while (429 `OTP_RATE_LIMITED`).
+  bool get isOtpRateLimited => code == ErrorCodes.otpRateLimited;
+
+  /// Too many codes requested for this email in the last hour (429 `OTP_REQUEST_LIMIT`).
+  bool get isOtpRequestLimited => code == ErrorCodes.otpRequestLimit;
+
+  /// Too many wrong passwords: the email is locked for the project's lockout duration (429 `ACCOUNT_LOCKED`).
+  bool get isAccountLocked => code == ErrorCodes.accountLocked;
+
+  /// Any rate limit or lockout (HTTP 429): show "Too many attempts, try again later".
+  bool get isTooManyAttempts => statusCode == 429;
+
   @override
   String toString() {
     if (code != null) {
