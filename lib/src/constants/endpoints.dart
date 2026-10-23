@@ -138,6 +138,8 @@ class Endpoints {
   // Database Operations (Client endpoints using project slug)
   static String projectDatabaseSql(String projectSlug) =>
       '/api/project/$projectSlug/database/sql';
+  static String projectDatabaseSemantic(String projectSlug) =>
+      '/api/project/$projectSlug/database/semantic';
   static String projectDatabaseTables(String projectSlug) =>
       '/api/project/$projectSlug/database/tables';
   static String projectDatabaseTablesList(String projectSlug) =>

@@ -18,6 +18,7 @@ export 'src/auth/services/passkey_authenticator_service.dart';
 
 // Database models and query builder
 export 'src/database/models/postgrest_response.dart';
+export 'src/database/models/semantic_response.dart';
 export 'src/database/services/query_builder.dart';
 export 'src/database/exceptions/database_exception.dart';
 
@@ -46,6 +47,9 @@ export 'src/storage/exceptions/storage_exception.dart';
 
 // AI Gateway — chat, streaming, tool calls and embeddings
 export 'src/ai/orbitnest_ai.dart';
+// AI data — memory, collections, threads, traces
+export 'src/ai/ai_data.dart';
+export 'src/ai/ai_data_models.dart';
 
 // Types and utilities
 export 'src/types/json_types.dart';

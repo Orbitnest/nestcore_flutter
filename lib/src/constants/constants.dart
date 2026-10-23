@@ -2,7 +2,7 @@
 class OrbitNestConstants {
   // Package info
   static const String packageName = 'orbitnest_studio_flutter';
-  static const String version = '1.7.0'; // keep in sync with pubspec.yaml
+  static const String version = '1.8.0'; // keep in sync with pubspec.yaml
 
   // Storage keys
   static const String accessTokenKey = 'orbitnest_access_token';

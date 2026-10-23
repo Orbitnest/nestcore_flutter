@@ -17,6 +17,7 @@ import '../edge_functions/repositories/functions_repository.dart';
 import '../edge_functions/services/functions_service.dart';
 import '../edge_functions/orbitnest_functions.dart';
 import '../ai/orbitnest_ai.dart';
+import '../ai/ai_data.dart';
 import '../jobs/services/jobs_service.dart';
 import '../migrations/services/migration_service.dart';
 import '../realtime/orbitnest_realtime.dart';
@@ -58,6 +59,8 @@ class OrbitNestClient {
   late final OrbitNestAnalytics _analytics;
   late final OrbitNestStorage _storage;
   late final OrbitNestAi _ai;
+  late final OrbitNestMemory _memory;
+  late final OrbitNestCollections _collections;
   late final StreamSubscription<AuthState> _authSubscription;
 
   OrbitNestClient._({
@@ -201,6 +204,8 @@ class OrbitNestClient {
       projectSlug: _projectSlug,
     );
     _ai = OrbitNestAi(httpClient: _httpClient, projectSlug: _projectSlug);
+    _memory = OrbitNestMemory(httpClient: _httpClient, projectSlug: _projectSlug);
+    _collections = OrbitNestCollections(httpClient: _httpClient, projectSlug: _projectSlug);
   }
 
   /// Get the authentication API (simplified interface)
@@ -231,6 +236,14 @@ class OrbitNestClient {
   /// AI Gateway — `client.ai.chat(...)`, `chatStream(...)`, `embed(...)`,
   /// `models()` with the project's own provider keys.
   OrbitNestAi get ai => _ai;
+
+  /// Memory API — facts about the signed-in user with semantic search:
+  /// `client.memory.add(...)`, `search(...)`, `forget()`.
+  OrbitNestMemory get memory => _memory;
+
+  /// Vector collections — `client.collections.from('handbook').ingest(...)`
+  /// and hybrid `search(...)`.
+  OrbitNestCollections get collections => _collections;
 
   /// Convenience shortcut: create a realtime channel directly on the client.
   RealtimeChannel channel(String name) => _realtime.channel(name);

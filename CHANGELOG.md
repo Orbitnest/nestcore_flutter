@@ -1,3 +1,18 @@
+## [1.8.0]
+
+### Added — AI data (parity with the Node/Web SDK)
+- `client.memory`: `add` (dedupes near-identical memories unless `dedupe: false`), `search` (`similarity`, `score`, `degraded` keyword fallback), `list`, `get`, `update`, `remove`, `forget`, and service-key `subjects` / `reembed`. Typed `AiMemory`, `AiMemoryMatch`, `AiMemorySearchResult`.
+- `client.collections`: `create`, `list`, `get`, `update`, `delete`, and `from(name)` → `ingest(AiDocumentSource.text/url/storage, wait: true)` (polls with `waitFor` until `ready`/`failed`, `TIMEOUT` on expiry), hybrid `search` (score, similarity, keyword match, `**` highlight, chunk + document), `listDocuments`, `getDocument`, `remove`, `stats`.
+- `client.ai.threads`: `create`, `list`, `get`, `delete`, and `from(id)` → `get`, `update`, `delete`, `messages`, `append` (text, image URL or `AiThreadPart.storage` parts), `run` (a `Stream<ThreadRunEvent>`: `ThreadRunMessage`, `ThreadRunCitation`, `ThreadRunDelta`, `ThreadRunToolCall`, `ThreadRunToolResult`, then `ThreadRunDone` or `ThreadRunError`; cancelling the subscription closes the connection and stops the run) and `runOnce`. Run options: `memory` (true or a `type:id` subject), `collections`, `tools` (`AiThreadTool.memorySearch` / `collectionsSearch`), `maxContextTokens`, model settings.
+- `client.ai.traces(...)` (service key): per-call model, tokens, latency, cost and status.
+- `from(table)…semantic(column, query, k:, hybridColumn:, minSimilarity:)` keeps the builder's `eq`/`gt`/`inFilter`/`isFilter`… filters and `limit` (as `k`); `database.semantic(table, column, query, filters: [SemanticFilter(...)])` calls it directly. Returns `SemanticResponse` (rows with `_similarity` and `_score`, plus `model`).
+
+### Changed — Database
+- `textSearch(column, query, config:, type:)` is now chainable with the other filters instead of throwing `UnsupportedError` (`type`: `websearch` (default), `plain`, `phrase`). New chainable `nearest(column, vector, metric:, limit:)`. Queries that use either run as one parameterized SELECT through the SQL endpoint (identifiers checked and quoted, values bound; RLS applies); `count` is then the number of rows returned. `update()`/`delete()` and `semantic()` refuse builders that use them.
+
+### Internal
+- `chatStream` and thread runs share one dart:io SSE helper (same cancel-closes-socket behaviour).
+
 ## [1.7.0]
 
 ### Added — AI gateway

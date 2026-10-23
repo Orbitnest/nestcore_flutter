@@ -25,7 +25,7 @@ The client is built on the BLoC pattern internally, but you don't need to know B
 
 ```yaml
 dependencies:
-  orbitnest_studio_flutter: ^1.7.0
+  orbitnest_studio_flutter: ^1.8.0
 ```
 
 ```bash
@@ -242,8 +242,20 @@ await orbitnest.from('users').eq('id', 1).delete();
 Filters: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `inFilter`, `isFilter` / `isNull` (`null`, `true`, `false`), `match`, `not(col, 'eq', v)`.
 Modifiers: `order` (one column), `limit`, `range`, `single`, `maybeSingle`. A page holds at most 100 rows.
 
+Full-text and vector search chain like the other filters (the query then runs as one parameterized SELECT; `count` is the number of rows returned):
+
+```dart
+final hits = await orbitnest.from('posts')
+    .eq('published', true)
+    .textSearch('body', 'refund -gift', type: 'websearch') // or 'plain', 'phrase'; config: 'english'
+    .limit(20)
+    .execute();
+
+final near = await orbitnest.from('docs').nearest('embedding', queryVector, metric: 'cosine', limit: 5).execute();
+```
+
 Limits of the API, enforced by the SDK (they throw instead of silently returning wrong rows):
-- `contains`, `containedBy`, `overlaps`, the `range*` filters, `textSearch`, `or`, `and`, `isNotNull` and `upsert` throw `UnsupportedError`. Use `database.sql()` for those queries.
+- `contains`, `containedBy`, `overlaps`, the `range*` filters, `or`, `and`, `isNotNull` and `upsert` throw `UnsupportedError`. Use `database.sql()` for those queries.
 - `inFilter` values cannot contain `,`.
 - `select()` takes plain column names (no aliases or embedded relations).
 - `update()`/`delete()` require at least one filter; they match rows with `column = value` (AND).
@@ -278,6 +290,18 @@ final matches = await orbitnest.database.vectorSearch(
   metric: 'cosine',   // 'l2' (default), 'cosine', or 'ip'
   limit: 5,
 );
+```
+
+### Semantic search (automatic embeddings)
+
+For a column embedded with automatic embeddings (Studio → AI → Embeddings). Needs a signed-in user; RLS applies.
+
+```dart
+final r = await orbitnest.from('articles')
+    .eq('published', true)
+    .limit(5)                                  // k
+    .semantic('body_embedding', 'how do I reset my password?', hybridColumn: 'body');
+for (final row in r.rows) print('${row['title']} ${row['_similarity']}');
 ```
 
 ### Raw SQL
@@ -379,6 +403,35 @@ final e = await orbitnest.ai.embed(['first', 'second']); // 768 dimensions
 
 Tool calls: answer each `r.toolCalls` entry with `AiMessage.toolResult(call, result)` after appending `AiMessage.fromResult(r)` to the history, then chat again. Cancelling the stream subscription stops the reply at the server. Errors from `chat`/`embed` are `AiException` (`code`, `statusCode`, `body`).
 
+### Memory, collections and threads
+
+```dart
+// Memory: facts about the signed-in user, searched by meaning.
+await orbitnest.memory.add('Prefers vegetarian recipes', kind: 'preference');
+final m = await orbitnest.memory.search('what should I cook?');
+await orbitnest.memory.forget(); // delete everything about this user
+
+// Collections: documents chunked, embedded and searched (vector + keyword).
+final kb = orbitnest.collections.from('handbook');
+await kb.ingest(AiDocumentSource.text(notes), title: 'Notes', wait: true); // needs userIngest for users
+final hits = await kb.search('How do refunds work?', k: 5);
+
+// Threads: saved conversations; replies stream and are stored as they arrive.
+final t = await orbitnest.ai.threads.create(title: 'Trip ideas');
+await for (final ev in orbitnest.ai.threads.from(t.id).run(
+    input: 'Plan a weekend in Oslo', memory: true, collections: ['handbook'])) {
+  switch (ev) {
+    case ThreadRunDelta(:final text): setState(() => reply += text);
+    case ThreadRunCitation(:final citation): sources.add(citation);
+    case ThreadRunError(:final message): showError(message);
+    default: break;
+  }
+}
+final history = await orbitnest.ai.threads.from(t.id).messages();
+```
+
+Creating collections, adding shared documents, `memory.subjects()`/`reembed()` and `ai.traces()` need the service-role key, which an app never holds (use Studio, the Node SDK or the CLI). `runOnce()` waits for the finished message instead of streaming. Failures throw `AiException`; `run()` yields a `ThreadRunError` instead.
+
 ## Analytics
 
 ```dart
@@ -440,7 +493,8 @@ final rows = await db.from('users').select('*').eq('status', 'active').execute()
 | Area | Entry point | Notes |
 |------|-------------|-------|
 | Auth | `orbitnest.auth` | password, email/SMS OTP, MFA (TOTP), passkeys, sessions |
-| Database | `orbitnest.from(table)`, `orbitnest.database` | query builder, CRUD, pgvector, raw SQL |
+| Database | `orbitnest.from(table)`, `orbitnest.database` | query builder, full-text, pgvector, semantic search, CRUD, raw SQL |
+| AI | `orbitnest.ai`, `orbitnest.memory`, `orbitnest.collections` | chat/stream/embed, threads, memory, document collections |
 | Storage | `orbitnest.storage.from(bucket)` | upload, download, list, remove, public URLs + transforms |
 | Realtime | `orbitnest.realtime.channel(name)` | Postgres changes, broadcast, presence |
 | Functions | `orbitnest.functions` | invoke only (`invoke`, `call`, `get`/`post`/`put`/`delete`) |

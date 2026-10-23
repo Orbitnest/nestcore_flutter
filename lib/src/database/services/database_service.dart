@@ -1,7 +1,8 @@
-import 'package:dio/dio.dart' show Response;
+import 'package:dio/dio.dart' show Options, Response;
 import '../../client/http_client.dart';
 import '../../constants/endpoints.dart';
 import '../models/postgrest_response.dart';
+import '../models/semantic_response.dart';
 import '../models/table_schema.dart';
 import '../exceptions/database_exception.dart';
 
@@ -38,6 +39,47 @@ class DatabaseService {
         count: body is Map ? (body['rows_affected'] as num?)?.toInt() : null,
         status: response.statusCode,
       );
+    } catch (e) {
+      throw DatabaseException.fromException(e);
+    }
+  }
+
+  /// Rows of [table] nearest to [query] by meaning, from a column embedded
+  /// with automatic embeddings (Studio → AI → Embeddings). Runs under RLS.
+  /// Needs a signed-in user or the service key.
+  Future<SemanticResponse> semantic({
+    required String table,
+    required String column,
+    required String query,
+    int? k,
+    List<SemanticFilter>? filters,
+    String? hybridColumn,
+    double? minSimilarity,
+  }) async {
+    for (final id in [table, column, if (hybridColumn != null) hybridColumn, ...?filters?.map((f) => f.column)]) {
+      if (!_identifier.hasMatch(id)) throw ArgumentError.value(id, 'identifier', 'Invalid table or column name');
+    }
+    for (final f in filters ?? const <SemanticFilter>[]) {
+      if (!SemanticFilter.ops.contains(f.op)) {
+        throw UnsupportedError('semantic(): filter operator "${f.op}" is not supported (${SemanticFilter.ops.join(', ')})');
+      }
+    }
+    try {
+      final response = await _httpClient.post(
+        Endpoints.projectDatabaseSemantic(_projectSlug),
+        data: {
+          'table': table,
+          'column': column,
+          'query': query,
+          if (k != null) 'k': k,
+          if (filters != null && filters.isNotEmpty) 'filters': filters.map((f) => f.toJson()).toList(),
+          if (hybridColumn != null) 'hybridColumn': hybridColumn,
+          if (minSimilarity != null) 'minSimilarity': minSimilarity,
+        },
+        // Embeds the query (billed): never resent.
+        options: Options(receiveTimeout: const Duration(seconds: 130), extra: {'noRetry': true}),
+      );
+      return SemanticResponse.fromJson(Map<String, dynamic>.from(response.data as Map));
     } catch (e) {
       throw DatabaseException.fromException(e);
     }

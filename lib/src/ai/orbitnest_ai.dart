@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
 import '../client/http_client.dart';
 import '../client/interceptors/error_interceptor.dart';
+import 'ai_data.dart';
+import 'ai_data_models.dart';
+import 'sse.dart';
 
 /// Thrown by [OrbitNestAi.chat], [OrbitNestAi.embed] and [OrbitNestAi.models].
 ///
@@ -239,7 +240,12 @@ class OrbitNestAi {
 
   OrbitNestAi({required OrbitNestHttpClient httpClient, required String projectSlug})
       : _httpClient = httpClient,
-        _projectSlug = projectSlug;
+        _projectSlug = projectSlug,
+        threads = AiThreads(httpClient: httpClient, projectSlug: projectSlug);
+
+  /// Persistent conversations with streamed, saved replies:
+  /// `threads.from(id).run(...)`.
+  final AiThreads threads;
 
   String _path(String p) => '/api/project/$_projectSlug/ai/v1/$p';
 
@@ -302,51 +308,14 @@ class OrbitNestAi {
     List<AiTool>? tools,
     String? toolChoice,
   }) async* {
-    // dart:io, not Dio: cancelling a Dio stream drains the rest of the body (the
-    // server keeps generating and billing). A per-stream client closed with
-    // force destroys the socket, which stops the reply at the server.
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
-    var closed = false;
-    try {
-      final HttpClientResponse res;
-      try {
-        final req = await client.postUrl(Uri.parse('${_httpClient.baseUrl}${_path('chat')}'));
-        (await _httpClient.authHeaders()).forEach(req.headers.set);
-        req.headers
-          ..contentType = ContentType.json
-          ..set(HttpHeaders.acceptHeader, 'text/event-stream');
-        req.followRedirects = false;
-        req.add(utf8.encode(jsonEncode(_body(
-          messages: messages, model: model, provider: provider, temperature: temperature,
-          maxTokens: maxTokens, tools: tools, toolChoice: toolChoice, stream: true,
-        ))));
-        res = await req.close().timeout(const Duration(seconds: 130));
-      } catch (e) {
-        yield AiStreamError('Network error: $e', code: 'NETWORK_ERROR');
-        return;
-      }
-      if (res.statusCode != 200) {
-        Map<String, dynamic>? body;
-        try {
-          body = Map<String, dynamic>.from(jsonDecode(await utf8.decodeStream(res)) as Map);
-        } catch (_) {}
-        final m = body?['message'];
-        yield AiStreamError(m is List ? m.join(', ') : m?.toString() ?? 'Request failed (${res.statusCode})',
-            code: body?['code']?.toString(), statusCode: res.statusCode);
-        return;
-      }
-      try {
-        await for (final line in res.transform(utf8.decoder).transform(const LineSplitter())) {
-          if (!line.startsWith('data:')) continue;
-          yield AiStreamEvent.fromJson(Map<String, dynamic>.from(jsonDecode(line.substring(5).trim()) as Map));
-        }
-      } catch (e) {
-        if (!closed) yield AiStreamError('Stream interrupted: $e', code: 'STREAM_ERROR');
-      }
-    } finally {
-      // Also runs when the listener cancels.
-      closed = true;
-      client.close(force: true);
+    final body = _body(
+      messages: messages, model: model, provider: provider, temperature: temperature,
+      maxTokens: maxTokens, tools: tools, toolChoice: toolChoice, stream: true,
+    );
+    await for (final item in postSse(_httpClient, _path('chat'), body)) {
+      yield item is SseFailure
+          ? AiStreamError(item.message, code: item.code, statusCode: item.statusCode)
+          : AiStreamEvent.fromJson(item as Map<String, dynamic>);
     }
   }
 
@@ -375,6 +344,23 @@ class OrbitNestAi {
     try {
       final res = await _httpClient.get(_path('models'));
       return (res.data as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
+    } catch (e) {
+      throw await AiException.fromError(e);
+    }
+  }
+
+  /// Service key: per-call traces (model, tokens, latency, cost, status),
+  /// newest first. [status] is `ok` or `error`. Throws [AiException] (403 with
+  /// a user token).
+  Future<AiTracePage> traces({int? limit, int? offset, String? threadId, String? status}) async {
+    try {
+      final res = await _httpClient.get(_path('traces'), queryParameters: {
+        if (limit != null) 'limit': '$limit',
+        if (offset != null) 'offset': '$offset',
+        if (threadId != null) 'threadId': threadId,
+        if (status != null) 'status': status,
+      });
+      return AiTracePage.fromJson(Map<String, dynamic>.from(res.data as Map));
     } catch (e) {
       throw await AiException.fromError(e);
     }

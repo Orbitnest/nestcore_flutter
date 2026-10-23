@@ -6,6 +6,7 @@
 //   DELETE tables/:t/rows/bulk   [{col: val, ...}]
 //   POST sql              {sql, params}
 import 'package:orbitnest_studio_flutter/src/database/services/query_builder.dart';
+import 'package:orbitnest_studio_flutter/src/database/models/semantic_response.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -152,7 +153,6 @@ void main() {
       final b = db.from('posts');
       expect(() => b.contains('tags', ['a']), throwsUnsupportedError);
       expect(() => b.or('a.eq.1,b.eq.2'), throwsUnsupportedError);
-      expect(() => b.textSearch('body', 'x'), throwsUnsupportedError);
       expect(() => b.isNotNull('x'), throwsUnsupportedError);
       expect(() => b.inFilter('tag', ['a,b']), throwsArgumentError);
       b.order('a');
@@ -291,6 +291,125 @@ void main() {
         'sql': r'SELECT * FROM "docs" ORDER BY "embedding" <=> $1::vector LIMIT 3',
         'params': ['[0.5,1.0]'],
       });
+    });
+
+    test('textSearch() chains with filters, order and range into one bound SELECT', () async {
+      http.reply = (_) => {
+            'rows_affected': 1,
+            'data': [
+              {'id': 1, 'title': 'a'}
+            ],
+          };
+      final res = await db
+          .from('posts')
+          .select('id, title')
+          .eq('published', true)
+          .isNull('deleted_at')
+          .inFilter('tag', ['a', 'b'])
+          .textSearch('body', 'cats -dogs')
+          .textSearch('title', 'red fox', config: 'simple', type: 'phrase')
+          .order('created_at', ascending: false)
+          .range(10, 19)
+          .execute();
+      final call = http.calls.single;
+      expect(call.path, '/api/project/demo/database/sql');
+      expect(call.data, {
+        'sql': 'SELECT "id", "title" FROM "posts" WHERE "published" = \$1 AND "deleted_at" IS NULL '
+            'AND "tag" IN (\$2, \$3) '
+            "AND to_tsvector('english', \"body\"::text) @@ websearch_to_tsquery('english', \$4) "
+            "AND to_tsvector('simple', \"title\"::text) @@ phraseto_tsquery('simple', \$5) "
+            'ORDER BY "created_at" DESC LIMIT \$6 OFFSET \$7',
+        'params': [true, 'a', 'b', 'cats -dogs', 'red fox', 10, 10],
+      });
+      expect(res.data.single['title'], 'a');
+      expect(res.count, 1);
+    });
+
+    test('textSearch()/nearest() reject unsafe input before any request', () {
+      expect(() => db.from('posts').textSearch('body; drop', 'x'), throwsArgumentError);
+      expect(() => db.from('posts').textSearch('body', 'x', config: "english'"), throwsArgumentError);
+      expect(() => db.from('posts').textSearch('body', 'x', type: 'fuzzy'), throwsArgumentError);
+      expect(() => db.from('docs').nearest('embedding', [double.nan]), throwsArgumentError);
+      expect(() => db.from('docs').nearest('embedding', [1], metric: 'dot'), throwsArgumentError);
+      expect(http.calls, isEmpty);
+    });
+
+    test('nearest() orders by distance first, keeps filters, binds the vector', () async {
+      http.reply = (_) => {'data': []};
+      await db.from('docs').eq('team', 'a').nearest('embedding', [0.5, 1], metric: 'cosine', limit: 3).execute();
+      expect(http.calls.single.data, {
+        'sql': r'SELECT * FROM "docs" WHERE "team" = $1 ORDER BY "embedding" <=> $2::vector LIMIT $3',
+        'params': ['a', '[0.5,1]', 3],
+      });
+    });
+
+    test('update()/delete() refuse textSearch/nearest builders', () async {
+      await expectLater(db.from('posts').eq('id', 1).textSearch('body', 'x').delete(), throwsUnsupportedError);
+      expect(http.calls, isEmpty);
+    });
+
+    test('semantic() sends the builder filters, limit as k, and projects columns', () async {
+      http.reply = (_) => {
+            'model': 'mock-embed',
+            'rows': [
+              {'id': 1, 'title': 'a', 'body': 'x', '_similarity': 0.9, '_score': 0.03},
+            ],
+          };
+      final res = await db
+          .from('articles')
+          .select('id, title')
+          .eq('published', true)
+          .gt('views', 10)
+          .inFilter('tag', ['a', 'b'])
+          .isNull('deleted_at')
+          .isFilter('pinned', true)
+          .limit(5)
+          .semantic('body_embedding', 'reset password', hybridColumn: 'body', minSimilarity: 0.2);
+      final call = http.calls.single;
+      expect(call.method, 'POST');
+      expect(call.path, '/api/project/demo/database/semantic');
+      expect(call.data, {
+        'table': 'articles',
+        'column': 'body_embedding',
+        'query': 'reset password',
+        'k': 5,
+        'filters': [
+          {'column': 'published', 'op': 'eq', 'value': true},
+          {'column': 'views', 'op': 'gt', 'value': 10},
+          {'column': 'tag', 'op': 'in', 'value': ['a', 'b']},
+          {'column': 'deleted_at', 'op': 'is', 'value': null},
+          {'column': 'pinned', 'op': 'is', 'value': true},
+        ],
+        'hybridColumn': 'body',
+        'minSimilarity': 0.2,
+      });
+      expect(res.model, 'mock-embed');
+      expect(res.rows.single, {'id': 1, 'title': 'a', '_similarity': 0.9, '_score': 0.03});
+      expect(SemanticResponse.similarityOf(res.rows.single), 0.9);
+    });
+
+    test('semantic() refuses textSearch/nearest/order/offset before any request', () async {
+      await expectLater(db.from('a').textSearch('body', 'x').semantic('e', 'q'), throwsUnsupportedError);
+      await expectLater(db.from('a').nearest('e', [1]).semantic('e', 'q'), throwsUnsupportedError);
+      await expectLater(db.from('a').order('id').semantic('e', 'q'), throwsUnsupportedError);
+      await expectLater(db.from('a').range(10, 19).semantic('e', 'q'), throwsUnsupportedError);
+      expect(http.calls, isEmpty);
+    });
+
+    test('database.semantic() posts directly; k and filters optional', () async {
+      http.reply = (_) => {'model': null, 'rows': []};
+      final res = await db.semantic('articles', 'body_embedding', 'x', filters: const [SemanticFilter('views', 'gte', 3)]);
+      expect(http.calls.single.data, {
+        'table': 'articles',
+        'column': 'body_embedding',
+        'query': 'x',
+        'filters': [
+          {'column': 'views', 'op': 'gte', 'value': 3}
+        ],
+      });
+      expect(res.rows, isEmpty);
+      expect(res.model, isNull);
+      await expectLater(db.semantic('articles', 'e', 'x', filters: const [SemanticFilter('a', 'contains', 1)]), throwsUnsupportedError);
     });
 
     test('concurrent calls each get their own result (B-07)', () async {

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'bloc/database_bloc.dart';
 import 'bloc/database_state.dart';
 import 'models/postgrest_response.dart';
+import 'models/semantic_response.dart';
 import 'services/database_service.dart';
 import 'services/query_builder.dart';
 
@@ -98,6 +99,33 @@ class OrbitNestDatabase extends ChangeNotifier {
     final sql =
         'SELECT $select FROM "$table" ORDER BY "$column" $op \$1::vector LIMIT ${limit.toInt()}';
     return _service.executeSql(sql: sql, parameters: ['[${vector.join(',')}]']);
+  }
+
+  /// Rows nearest to [query] by meaning, from a column embedded with automatic
+  /// embeddings (Studio → AI → Embeddings). Runs under RLS as the signed-in
+  /// user (the anon key alone gets 401). Each row carries `_similarity`
+  /// (cosine) and `_score`. With [hybridColumn], keyword matches on that text
+  /// column are blended in (reciprocal rank fusion). [k] is 1–100 (default 10).
+  ///
+  /// Usually reached through `from(table).eq(...).semantic(column, query)`.
+  Future<SemanticResponse> semantic(
+    String table,
+    String column,
+    String query, {
+    int? k,
+    List<SemanticFilter>? filters,
+    String? hybridColumn,
+    double? minSimilarity,
+  }) {
+    return _service.semantic(
+      table: table,
+      column: column,
+      query: query,
+      k: k,
+      filters: filters,
+      hybridColumn: hybridColumn,
+      minSimilarity: minSimilarity,
+    );
   }
 
   /// Insert one row; returns the inserted row. `upsert: true` throws
