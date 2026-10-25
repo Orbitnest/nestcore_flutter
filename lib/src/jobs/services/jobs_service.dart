@@ -5,11 +5,11 @@ import '../exceptions/job_exception.dart';
 
 /// Service for background jobs API calls (admin only).
 class JobsService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
   JobsService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String projectSlug,
   })  : _httpClient = httpClient,
         _projectSlug = projectSlug;

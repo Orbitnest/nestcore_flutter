@@ -9,7 +9,7 @@ import '../../client/interceptors/error_interceptor.dart';
 /// e.g. `402 QUOTA_EXCEEDED` (with `quota`/`plan`/`limit`/`usage` in [body]),
 /// `403` for a private bucket the caller can't read, `404` for a missing
 /// bucket or file.
-class StorageException extends OrbitNestException {
+class StorageException extends NestCoreException {
   const StorageException(
     super.message, {
     super.code,
@@ -20,7 +20,7 @@ class StorageException extends OrbitNestException {
   factory StorageException.fromException(Object error) {
     if (error is StorageException) return error;
     if (error is DioException) {
-      final wrapped = error.error is OrbitNestException ? error.error as OrbitNestException : null;
+      final wrapped = error.error is NestCoreException ? error.error as NestCoreException : null;
       var body = wrapped?.body;
       // download() asks for bytes, so its error body arrives undecoded.
       final raw = error.response?.data;
@@ -38,7 +38,7 @@ class StorageException extends OrbitNestException {
         body: body,
       );
     }
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return StorageException(error.message, code: error.code, statusCode: error.statusCode, body: error.body);
     }
     return StorageException(error.toString(), code: 'UNKNOWN_STORAGE_ERROR');

@@ -4,7 +4,7 @@ import 'package:passkeys/types.dart';
 import '../exceptions/auth_exception.dart';
 import '../../constants/error_codes.dart';
 
-/// Bridges WebAuthn options/responses produced by the OrbitNest server with the
+/// Bridges WebAuthn options/responses produced by the NestCore server with the
 /// platform credential APIs (Android Credential Manager, iOS ASAuthorization).
 ///
 /// Server returns a standard PublicKeyCredentialCreation/RequestOptionsJSON;

@@ -38,7 +38,7 @@ class LoggingInterceptor extends Interceptor {
   }
 
   void _logRequest(RequestOptions options) {
-    OrbitNestLogger.logRequest(
+    NestCoreLogger.logRequest(
       options.method.toUpperCase(),
       options.uri.toString(),
       {
@@ -50,7 +50,7 @@ class LoggingInterceptor extends Interceptor {
   }
 
   void _logResponse(Response response) {
-    OrbitNestLogger.logResponse(
+    NestCoreLogger.logResponse(
       response.statusCode ?? 0,
       response.requestOptions.uri.toString(),
       {
@@ -64,7 +64,7 @@ class LoggingInterceptor extends Interceptor {
   }
 
   void _logError(DioException error) {
-    OrbitNestLogger.logHttpError(
+    NestCoreLogger.logHttpError(
       '${error.type}: ${error.message}',
       error.requestOptions.uri.toString(),
       error.response != null

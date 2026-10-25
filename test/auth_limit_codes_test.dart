@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/orbitnest_studio_flutter.dart';
+import 'package:nestcore_flutter/nestcore_flutter.dart';
 
 void main() {
   test('AuthException names the project auth limit codes', () {
     final locked = AuthException.fromException(
-      const OrbitNestException('Too many failed sign-in attempts.', code: 'ACCOUNT_LOCKED', statusCode: 429),
+      const NestCoreException('Too many failed sign-in attempts.', code: 'ACCOUNT_LOCKED', statusCode: 429),
     );
     expect(locked.isAccountLocked, isTrue);
     expect(locked.isTooManyAttempts, isTrue);

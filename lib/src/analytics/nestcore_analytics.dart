@@ -1,9 +1,9 @@
 import 'services/analytics_service.dart';
 
-class OrbitNestAnalytics {
+class NestCoreAnalytics {
   final AnalyticsService _service;
 
-  OrbitNestAnalytics(AnalyticsService service) : _service = service;
+  NestCoreAnalytics(AnalyticsService service) : _service = service;
 
   void identify(String userId, {Map<String, dynamic>? traits}) =>
       _service.identify(userId, traits: traits);

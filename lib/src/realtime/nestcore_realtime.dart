@@ -4,7 +4,7 @@ export 'realtime_events.dart';
 export 'realtime_channel.dart'
     show RealtimeChannel, RealtimeFilter, ChannelStatus;
 
-/// Supabase-style realtime facade exposed on [OrbitNestClient].
+/// Supabase-style realtime facade exposed on [NestCoreClient].
 ///
 /// ```dart
 /// final ch = client.realtime.channel('orders')
@@ -14,10 +14,10 @@ export 'realtime_channel.dart'
 ///       callback: (e) => print(e.newRow))
 ///   ..subscribe();
 /// ```
-class OrbitNestRealtime {
+class NestCoreRealtime {
   final RealtimeChannelManager _manager;
 
-  OrbitNestRealtime({
+  NestCoreRealtime({
     required String baseUrl,
     required String projectSlug,
     required String apiKey,

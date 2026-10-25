@@ -1,20 +1,20 @@
-// Pins the database layer to the request shapes the OrbitNest data API
+// Pins the database layer to the request shapes the NestCore data API
 // actually reads (client-database.controller.ts / database-ops.service.ts):
 //   GET  tables/:t/data   ?filter=col:op:val (repeatable) &sortBy &sortOrder &limit | from/to
 //   POST tables/:t/rows   single insert
 //   PUT  tables/:t/rows/bulk     [{where, data}]
 //   DELETE tables/:t/rows/bulk   [{col: val, ...}]
 //   POST sql              {sql, params}
-import 'package:orbitnest_studio_flutter/src/database/services/query_builder.dart';
-import 'package:orbitnest_studio_flutter/src/database/models/semantic_response.dart';
+import 'package:nestcore_flutter/src/database/services/query_builder.dart';
+import 'package:nestcore_flutter/src/database/models/semantic_response.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/client/http_client.dart';
-import 'package:orbitnest_studio_flutter/src/database/bloc/database_bloc.dart';
-import 'package:orbitnest_studio_flutter/src/database/orbitnest_database.dart';
-import 'package:orbitnest_studio_flutter/src/database/repositories/database_repository.dart';
-import 'package:orbitnest_studio_flutter/src/database/services/database_service.dart';
+import 'package:nestcore_flutter/src/client/http_client.dart';
+import 'package:nestcore_flutter/src/database/bloc/database_bloc.dart';
+import 'package:nestcore_flutter/src/database/nestcore_database.dart';
+import 'package:nestcore_flutter/src/database/repositories/database_repository.dart';
+import 'package:nestcore_flutter/src/database/services/database_service.dart';
 
 class _Call {
   _Call(this.method, this.path, this.query, this.data);
@@ -25,7 +25,7 @@ class _Call {
 }
 
 /// Records every request and answers with [reply] (optionally after [delay]).
-class _FakeHttp implements OrbitNestHttpClient {
+class _FakeHttp implements NestCoreHttpClient {
   final calls = <_Call>[];
   dynamic Function(_Call call) reply = (_) => {'success': true};
   Duration Function(_Call call) delay = (_) => Duration.zero;
@@ -85,12 +85,12 @@ class _FakeHttp implements OrbitNestHttpClient {
 void main() {
   late _FakeHttp http;
   late DatabaseService service;
-  late OrbitNestDatabase db;
+  late NestCoreDatabase db;
 
   setUp(() {
     http = _FakeHttp();
     service = DatabaseService(httpClient: http, projectSlug: 'demo');
-    db = OrbitNestDatabase(
+    db = NestCoreDatabase(
       DatabaseBloc(databaseRepository: DatabaseRepository(databaseService: service)),
       service,
     );

@@ -21,7 +21,7 @@ class SseFailure {
 /// server keeps generating and billing). A per-stream client closed with
 /// force destroys the socket.
 Stream<Object> postSse(
-  OrbitNestHttpClient http,
+  NestCoreHttpClient http,
   String path,
   Map<String, dynamic> body, {
   Duration headersTimeout = const Duration(seconds: 130),

@@ -8,23 +8,23 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/auth/bloc/auth_bloc.dart';
-import 'package:orbitnest_studio_flutter/src/auth/bloc/auth_event.dart';
-import 'package:orbitnest_studio_flutter/src/auth/bloc/auth_state.dart';
-import 'package:orbitnest_studio_flutter/src/auth/exceptions/auth_exception.dart';
-import 'package:orbitnest_studio_flutter/src/auth/models/auth_response.dart';
-import 'package:orbitnest_studio_flutter/src/auth/models/session.dart';
-import 'package:orbitnest_studio_flutter/src/auth/models/user.dart';
-import 'package:orbitnest_studio_flutter/src/auth/orbitnest_auth.dart';
-import 'package:orbitnest_studio_flutter/src/auth/repositories/auth_repository.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/auth_service.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/token_manager.dart';
-import 'package:orbitnest_studio_flutter/src/client/interceptors/auth_interceptor.dart';
-import 'package:orbitnest_studio_flutter/src/client/interceptors/error_interceptor.dart';
-import 'package:orbitnest_studio_flutter/src/client/interceptors/retry_interceptor.dart';
-import 'package:orbitnest_studio_flutter/src/constants/constants.dart';
-import 'package:orbitnest_studio_flutter/src/database/exceptions/database_exception.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/exceptions/function_exception.dart';
+import 'package:nestcore_flutter/src/auth/bloc/auth_bloc.dart';
+import 'package:nestcore_flutter/src/auth/bloc/auth_event.dart';
+import 'package:nestcore_flutter/src/auth/bloc/auth_state.dart';
+import 'package:nestcore_flutter/src/auth/exceptions/auth_exception.dart';
+import 'package:nestcore_flutter/src/auth/models/auth_response.dart';
+import 'package:nestcore_flutter/src/auth/models/session.dart';
+import 'package:nestcore_flutter/src/auth/models/user.dart';
+import 'package:nestcore_flutter/src/auth/nestcore_auth.dart';
+import 'package:nestcore_flutter/src/auth/repositories/auth_repository.dart';
+import 'package:nestcore_flutter/src/auth/services/auth_service.dart';
+import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
+import 'package:nestcore_flutter/src/client/interceptors/auth_interceptor.dart';
+import 'package:nestcore_flutter/src/client/interceptors/error_interceptor.dart';
+import 'package:nestcore_flutter/src/client/interceptors/retry_interceptor.dart';
+import 'package:nestcore_flutter/src/constants/constants.dart';
+import 'package:nestcore_flutter/src/database/exceptions/database_exception.dart';
+import 'package:nestcore_flutter/src/edge_functions/exceptions/function_exception.dart';
 
 /// TokenManager without secure storage.
 class _Tm extends TokenManager {
@@ -217,11 +217,11 @@ void main() {
     });
   });
 
-  group('OrbitNestAuth', () {
+  group('NestCoreAuth', () {
     late _Tm tm;
     late _Repo repo;
     late AuthBloc bloc;
-    late OrbitNestAuth auth;
+    late NestCoreAuth auth;
     late _Svc svc;
 
     setUp(() async {
@@ -229,7 +229,7 @@ void main() {
       repo = _Repo();
       bloc = AuthBloc(authRepository: repo, tokenManager: tm);
       svc = _Svc();
-      auth = OrbitNestAuth(bloc, svc, tm);
+      auth = NestCoreAuth(bloc, svc, tm);
       await bloc.stream.firstWhere((s) => s is AuthUnauthenticatedState);
     });
     tearDown(() => bloc.close());
@@ -288,7 +288,7 @@ void main() {
       ),
       h,
     );
-    expect((h.passed!.error as OrbitNestException).message,
+    expect((h.passed!.error as NestCoreException).message,
         'a should not exist, b must be a string');
   });
 
@@ -360,6 +360,6 @@ void main() {
   test('client version matches pubspec (B-28)', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final version = RegExp(r'^version:\s*(\S+)', multiLine: true).firstMatch(pubspec)!.group(1);
-    expect(OrbitNestConstants.version, version);
+    expect(NestCoreConstants.version, version);
   });
 }

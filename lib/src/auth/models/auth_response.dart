@@ -32,7 +32,7 @@ class AuthResponse {
   final bool? mfaRequired;
 
   /// Short-lived token identifying the pending MFA challenge. Pass it to
-  /// `OrbitNestAuth.verifyMfa(challengeToken:, code:)` with a TOTP or recovery
+  /// `NestCoreAuth.verifyMfa(challengeToken:, code:)` with a TOTP or recovery
   /// code to finish signing in. Non-null only when [mfaRequired] is true.
   final String? challengeToken;
 

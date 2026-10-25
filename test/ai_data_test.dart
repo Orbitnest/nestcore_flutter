@@ -8,12 +8,12 @@ import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/ai/ai_data.dart';
-import 'package:orbitnest_studio_flutter/src/ai/ai_data_models.dart';
-import 'package:orbitnest_studio_flutter/src/ai/orbitnest_ai.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/token_manager.dart';
-import 'package:orbitnest_studio_flutter/src/client/http_client.dart';
-import 'package:orbitnest_studio_flutter/src/utils/env_config.dart';
+import 'package:nestcore_flutter/src/ai/ai_data.dart';
+import 'package:nestcore_flutter/src/ai/ai_data_models.dart';
+import 'package:nestcore_flutter/src/ai/nestcore_ai.dart';
+import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
+import 'package:nestcore_flutter/src/client/http_client.dart';
+import 'package:nestcore_flutter/src/utils/env_config.dart';
 
 const _base = '/api/project/demo/ai/v1';
 
@@ -56,10 +56,10 @@ void main() {
   setUpAll(() => EnvConfig.initialize());
 
   late HttpServer server;
-  late OrbitNestHttpClient http;
-  late OrbitNestMemory memory;
-  late OrbitNestCollections collections;
-  late OrbitNestAi ai;
+  late NestCoreHttpClient http;
+  late NestCoreMemory memory;
+  late NestCoreCollections collections;
+  late NestCoreAi ai;
   final requests = <({String method, String path, Map<String, String> query, Object? body})>[];
   late Future<void> Function(HttpRequest req, Object? body) handler;
 
@@ -72,10 +72,10 @@ void main() {
       requests.add((method: req.method, path: req.uri.path, query: req.uri.queryParameters, body: body));
       await handler(req, body);
     });
-    http = OrbitNestHttpClient(baseUrl: 'http://127.0.0.1:${server.port}', tokenManager: TokenManager(projectSlug: 'demo', apiKey: 'anon'));
-    memory = OrbitNestMemory(httpClient: http, projectSlug: 'demo');
-    collections = OrbitNestCollections(httpClient: http, projectSlug: 'demo');
-    ai = OrbitNestAi(httpClient: http, projectSlug: 'demo');
+    http = NestCoreHttpClient(baseUrl: 'http://127.0.0.1:${server.port}', tokenManager: TokenManager(projectSlug: 'demo', apiKey: 'anon'));
+    memory = NestCoreMemory(httpClient: http, projectSlug: 'demo');
+    collections = NestCoreCollections(httpClient: http, projectSlug: 'demo');
+    ai = NestCoreAi(httpClient: http, projectSlug: 'demo');
   });
 
   tearDown(() => server.close(force: true));
@@ -514,7 +514,7 @@ void main() {
           if (!clientGone.isCompleted) clientGone.complete();
         });
       });
-      final streamingHttp = OrbitNestHttpClient(baseUrl: 'http://127.0.0.1:${raw.port}', tokenManager: TokenManager(projectSlug: 'demo', apiKey: 'anon'));
+      final streamingHttp = NestCoreHttpClient(baseUrl: 'http://127.0.0.1:${raw.port}', tokenManager: TokenManager(projectSlug: 'demo', apiKey: 'anon'));
       final threads = AiThreads(httpClient: streamingHttp, projectSlug: 'demo');
 
       final firstFew = Completer<void>();

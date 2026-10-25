@@ -7,18 +7,18 @@ import 'ai_data.dart';
 import 'ai_data_models.dart';
 import 'sse.dart';
 
-/// Thrown by [OrbitNestAi.chat], [OrbitNestAi.embed] and [OrbitNestAi.models].
+/// Thrown by [NestCoreAi.chat], [NestCoreAi.embed] and [NestCoreAi.models].
 ///
 /// [code] is the gateway code, e.g. `AI_PROVIDER_NOT_CONFIGURED`,
 /// `AI_BUDGET_EXCEEDED` (402, [body] holds `scope`, `limitUsd`, `usedUsd`) or
 /// `AI_RATE_LIMITED` (429, [body] holds `retryAfterSec`).
-class AiException extends OrbitNestException {
+class AiException extends NestCoreException {
   const AiException(super.message, {super.code, super.statusCode, super.body});
 
   static Future<AiException> fromError(Object error) async {
     if (error is AiException) return error;
     if (error is DioException) {
-      final wrapped = error.error is OrbitNestException ? error.error as OrbitNestException : null;
+      final wrapped = error.error is NestCoreException ? error.error as NestCoreException : null;
       Map<String, dynamic>? body = wrapped?.body;
       final raw = error.response?.data;
       if (body == null && raw is Map) {
@@ -32,7 +32,7 @@ class AiException extends OrbitNestException {
         body: body,
       );
     }
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return AiException(error.message, code: error.code, statusCode: error.statusCode, body: error.body);
     }
     return AiException(error.toString(), code: 'UNKNOWN_AI_ERROR');
@@ -170,7 +170,7 @@ class AiChatResult {
       );
 }
 
-/// Events of [OrbitNestAi.chatStream].
+/// Events of [NestCoreAi.chatStream].
 sealed class AiStreamEvent {
   const AiStreamEvent();
 
@@ -225,7 +225,7 @@ class AiEmbedResult {
 }
 
 /// AI Gateway: chat, streaming and embeddings through the project's own
-/// provider keys (Studio → Project Settings → AI). Calls need a signed-in user
+/// provider keys (NestCore → Project Settings → AI). Calls need a signed-in user
 /// or a service-role key.
 ///
 /// ```dart
@@ -234,11 +234,11 @@ class AiEmbedResult {
 ///   if (ev is AiTextDelta) setState(() => reply += ev.text);
 /// }
 /// ```
-class OrbitNestAi {
-  final OrbitNestHttpClient _httpClient;
+class NestCoreAi {
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
-  OrbitNestAi({required OrbitNestHttpClient httpClient, required String projectSlug})
+  NestCoreAi({required NestCoreHttpClient httpClient, required String projectSlug})
       : _httpClient = httpClient,
         _projectSlug = projectSlug,
         threads = AiThreads(httpClient: httpClient, projectSlug: projectSlug);

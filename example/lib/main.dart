@@ -1,38 +1,38 @@
 import 'package:flutter/material.dart';
-import 'package:orbitnest_studio_flutter/orbitnest_studio_flutter.dart';
+import 'package:nestcore_flutter/nestcore_flutter.dart';
 
 /// Minimal example: initialize the client, sign in, and read a table.
 ///
 /// Provide your project's anon key via a `.env` file (see `.env.example`)
-/// or pass it directly to [OrbitNestClient.create].
+/// or pass it directly to [NestCoreClient.create].
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Loads ORBITNEST_ANON_KEY from a bundled `.env`.
+  // Loads NESTCORE_ANON_KEY from a bundled `.env`.
   await EnvConfig.initialize();
-  final orbitnest = OrbitNestClient.create();
+  final nestcore = NestCoreClient.create();
 
-  runApp(MyApp(orbitnest: orbitnest));
+  runApp(MyApp(nestcore: nestcore));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, required this.orbitnest});
+  const MyApp({super.key, required this.nestcore});
 
-  final OrbitNestClient orbitnest;
+  final NestCoreClient nestcore;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'OrbitNest Studio Example',
-      home: HomeScreen(orbitnest: orbitnest),
+      title: 'NestCore Example',
+      home: HomeScreen(nestcore: nestcore),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.orbitnest});
+  const HomeScreen({super.key, required this.nestcore});
 
-  final OrbitNestClient orbitnest;
+  final NestCoreClient nestcore;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -42,7 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _status = 'Idle';
   List<Map<String, dynamic>> _rows = const [];
 
-  OrbitNestClient get _client => widget.orbitnest;
+  NestCoreClient get _client => widget.nestcore;
 
   Future<void> _signInAndLoad() async {
     setState(() => _status = 'Signing in...');
@@ -66,7 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _rows = List<Map<String, dynamic>>.from(response.data);
         _status = 'Loaded ${_rows.length} rows';
       });
-    } on OrbitNestException catch (e) {
+    } on NestCoreException catch (e) {
       setState(() => _status = 'Error: ${e.message}');
     }
   }
@@ -80,7 +80,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('OrbitNest Studio')),
+      appBar: AppBar(title: const Text('NestCore')),
       body: Column(
         children: [
           Padding(

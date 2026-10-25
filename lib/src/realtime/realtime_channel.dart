@@ -284,7 +284,7 @@ class RealtimeChannel {
 // ─── RealtimeChannelManager ───────────────────────────────────────────────────
 
 /// Manages the WebSocket connection and all channels. Used internally by
-/// [OrbitNestRealtime].
+/// [NestCoreRealtime].
 // Reconnect tuning.
 const int _kBaseReconnectDelayMs = 1000;
 const int _kRateLimitedReconnectDelayMs = 10000;
@@ -335,10 +335,10 @@ class RealtimeChannelManager {
     final uri = Uri.parse(wsUrl);
     // Pass credentials via WS subprotocols rather than the URL query string so
     // they are not captured in proxy / gateway access logs.
-    final protocols = ['orbitnest-realtime-v1'];
-    if (apiKey != null) protocols.add('orbitnest.apikey.$apiKey');
+    final protocols = ['nestcore-realtime-v1'];
+    if (apiKey != null) protocols.add('nestcore.apikey.$apiKey');
     final jwt = await accessTokenProvider?.call() ?? userJwt;
-    if (jwt != null) protocols.add('orbitnest.user-jwt.$jwt');
+    if (jwt != null) protocols.add('nestcore.user-jwt.$jwt');
 
     final ws = WebSocketChannel.connect(uri, protocols: protocols);
     await ws.ready; // throws when the server is unreachable / handshake fails

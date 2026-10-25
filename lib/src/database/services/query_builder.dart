@@ -2,7 +2,7 @@ import '../models/postgrest_response.dart';
 import '../models/semantic_response.dart';
 import 'database_service.dart';
 
-/// Supabase-style query builder over the OrbitNest data API.
+/// Supabase-style query builder over the NestCore data API.
 ///
 /// Filters must be added before the terminal call (`execute`, `semantic`,
 /// `insert`, `update`, `upsert`, `delete`). The API supports `eq`, `neq`,
@@ -40,7 +40,7 @@ class PostgrestQueryBuilder<T> {
   }
 
   static Never _unsupported(String method) => throw UnsupportedError(
-      '$method() is not supported by the OrbitNest data API. '
+      '$method() is not supported by the NestCore data API. '
       'Use eq/neq/gt/gte/lt/lte/like/ilike/inFilter/isFilter, or database.sql().');
 
   /// Select columns (plain column list, applied client-side; `*` for all).
@@ -136,7 +136,7 @@ class PostgrestQueryBuilder<T> {
     bool nullsFirst = false,
   }) {
     if (_orderBy != null) {
-      throw UnsupportedError('The OrbitNest data API sorts by one column only');
+      throw UnsupportedError('The NestCore data API sorts by one column only');
     }
     _orderBy = column;
     _ascending = ascending;

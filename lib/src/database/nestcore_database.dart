@@ -13,14 +13,14 @@ import 'services/query_builder.dart';
 /// so concurrent calls never wait on or receive each other's results.
 /// Failures throw [DatabaseException]; unsupported usage throws
 /// [UnsupportedError] / [ArgumentError] before any request is sent.
-class OrbitNestDatabase extends ChangeNotifier {
+class NestCoreDatabase extends ChangeNotifier {
   final DatabaseBloc _databaseBloc;
   final DatabaseService _service;
   late final StreamSubscription _stateSubscription;
 
   DatabaseState _currentState = const DatabaseInitialState();
 
-  OrbitNestDatabase(this._databaseBloc, this._service) {
+  NestCoreDatabase(this._databaseBloc, this._service) {
     _stateSubscription = _databaseBloc.stream.listen((state) {
       _currentState = state;
       notifyListeners();
@@ -102,7 +102,7 @@ class OrbitNestDatabase extends ChangeNotifier {
   }
 
   /// Rows nearest to [query] by meaning, from a column embedded with automatic
-  /// embeddings (Studio → AI → Embeddings). Runs under RLS as the signed-in
+  /// embeddings (NestCore → AI → Embeddings). Runs under RLS as the signed-in
   /// user (the anon key alone gets 401). Each row carries `_similarity`
   /// (cosine) and `_score`. With [hybridColumn], keyword matches on that text
   /// column are blended in (reciprocal rank fusion). [k] is 1–100 (default 10).

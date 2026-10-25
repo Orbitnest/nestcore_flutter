@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/orbitnest_studio_flutter.dart';
+import 'package:nestcore_flutter/nestcore_flutter.dart';
 
 // Minimal JWT with payload {"role":"anon","project_slug":"test-project"}
 const _testAnonKey =
@@ -13,9 +13,9 @@ void main() {
     await EnvConfig.initialize();
   });
 
-  group('OrbitNestClient', () {
+  group('NestCoreClient', () {
     test('decodes project slug from JWT and uses hardcoded base URL', () {
-      final client = OrbitNestClient.create(anonKey: _testAnonKey);
+      final client = NestCoreClient.create(anonKey: _testAnonKey);
 
       expect(client.projectSlug, 'test-project');
       expect(client.baseUrl, EnvConfig.kBaseUrl);
@@ -32,7 +32,7 @@ void main() {
     });
 
     test('baseUrl returns hardcoded production URL', () {
-      expect(EnvConfig.baseUrl, 'https://api.orbitnest.io');
+      expect(EnvConfig.baseUrl, 'https://api.nestcore.io');
     });
   });
 }

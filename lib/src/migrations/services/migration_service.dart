@@ -10,11 +10,11 @@ import '../exceptions/migration_exception.dart';
 /// privileges and filesystem access to the migration files, which live on the
 /// backend / a trusted runner, not in a mobile app.
 class MigrationService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
   MigrationService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String projectSlug,
   })  : _httpClient = httpClient,
         _projectSlug = projectSlug;

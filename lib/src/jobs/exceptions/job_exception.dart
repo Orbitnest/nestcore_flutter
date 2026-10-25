@@ -1,7 +1,7 @@
 import '../../client/interceptors/error_interceptor.dart';
 
 /// Background job-specific exception.
-class JobException extends OrbitNestException {
+class JobException extends NestCoreException {
   const JobException(
     super.message, {
     super.code,
@@ -14,7 +14,7 @@ class JobException extends OrbitNestException {
   factory JobException.fromException(dynamic error) {
     if (error is JobException) return error;
 
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return JobException(
         error.message,
         code: error.code,

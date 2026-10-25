@@ -8,8 +8,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 class EnvConfig {
   static bool _initialized = false;
 
-  /// The default OrbitNest API base URL — used when no override is provided
-  static const String kBaseUrl = 'https://api.orbitnest.io';
+  /// The default NestCore API base URL — used when no override is provided
+  static const String kBaseUrl = 'https://api.nestcore.io';
 
   /// The Android emulator host alias — replaces localhost/127.0.0.1 so the
   /// emulator can reach the host machine's loopback interface.
@@ -23,15 +23,27 @@ class EnvConfig {
     try {
       await dotenv.load(fileName: envFileName ?? '.env');
     } catch (_) {
-      // No/unreadable .env asset (e.g. key passed to OrbitNestClient.create).
+      // No/unreadable .env asset (e.g. key passed to NestCoreClient.create).
       // Reads below go through [_env], which tolerates an unloaded dotenv.
     }
     _initialized = true;
   }
 
   /// Read a dotenv value; null when no `.env` was loaded (dotenv.env throws then).
-  static String? _env(String key) =>
+  static String? _rawEnv(String key) =>
       dotenv.isInitialized ? dotenv.env[key] : null;
+
+  /// Read a `NESTCORE_*` setting, falling back to the legacy `ORBITNEST_*`
+  /// name (pre-1.9.0 `.env` files) when the new one is unset or empty.
+  /// [key] is the suffix after the prefix, e.g. `ANON_KEY`.
+  static String? _env(String key) {
+    final value = _rawEnv('NESTCORE_$key');
+    if (value != null && value.isNotEmpty) return value;
+    return _rawEnv('$_legacyEnvPrefix$key');
+  }
+
+  /// Prefix of the pre-rename env variable names, still read as a fallback.
+  static const String _legacyEnvPrefix = 'ORBITNEST_';
 
   /// Check if environment is initialized
   static bool get isInitialized => _initialized;
@@ -57,10 +69,11 @@ class EnvConfig {
     return url;
   }
 
-  /// Get OrbitNest Studio base URL.
+  /// Get NestCore base URL.
   ///
-  /// Uses [kBaseUrl] (`https://api.orbitnest.io`) by default.
-  /// Can be overridden via the `ORBITNEST_API_URL` env variable in `.env`
+  /// Uses [kBaseUrl] (`https://api.nestcore.io`) by default.
+  /// Can be overridden via the `NESTCORE_API_URL` env variable in `.env`
+  /// (the legacy `ORBITNEST_API_URL` is still read when it is unset)
   /// — useful when pointing at a local development server.
   ///
   /// When running on an Android emulator in debug mode any `localhost` /
@@ -68,7 +81,7 @@ class EnvConfig {
   /// emulator can reach the host machine.
   static String get baseUrl {
     // Allow an env-var override for local development
-    final envUrl = _env('ORBITNEST_API_URL');
+    final envUrl = _env('API_URL');
     final raw = (envUrl != null && envUrl.isNotEmpty) ? envUrl : kBaseUrl;
     return resolveUrl(_enforceSecureScheme(raw));
   }
@@ -91,7 +104,7 @@ class EnvConfig {
     if (isLoopback) return url; // cleartext loopback is acceptable for dev
 
     debugPrint(
-      'OrbitNest SECURITY WARNING: ORBITNEST_API_URL "$url" uses cleartext '
+      'NestCore SECURITY WARNING: NESTCORE_API_URL "$url" uses cleartext '
       'http:// for a non-loopback host. Credentials would be sent unencrypted. '
       'Falling back to the secure default "$kBaseUrl". Use https://.',
     );
@@ -101,9 +114,9 @@ class EnvConfig {
   /// Get anonymous key
   static String get anonKey {
     _ensureInitialized();
-    final key = _env('ORBITNEST_ANON_KEY');
+    final key = _env('ANON_KEY');
     if (key == null || key.isEmpty) {
-      throw Exception('ORBITNEST_ANON_KEY is required in .env file');
+      throw Exception('NESTCORE_ANON_KEY is required in .env file');
     }
     return key;
   }
@@ -119,14 +132,14 @@ class EnvConfig {
   /// Check if debug mode is enabled
   static bool get isDebugMode {
     _ensureInitialized();
-    final debug = _env('ORBITNEST_DEBUG');
+    final debug = _env('DEBUG');
     return debug?.toLowerCase() == 'true';
   }
 
   /// Get API timeout in milliseconds (3 minutes default)
   static int get apiTimeout {
     _ensureInitialized();
-    final timeout = _env('ORBITNEST_API_TIMEOUT');
+    final timeout = _env('API_TIMEOUT');
     return int.tryParse(timeout ?? '180000') ?? 180000; // 3 minutes default
   }
 
@@ -160,12 +173,12 @@ class EnvConfig {
       final slug = json['project_slug'] as String?;
       if (slug == null || slug.isEmpty) {
         throw Exception(
-          'project_slug not found in ORBITNEST_ANON_KEY JWT payload',
+          'project_slug not found in NESTCORE_ANON_KEY JWT payload',
         );
       }
       return slug;
     } catch (e) {
-      throw Exception('Failed to decode project slug from ORBITNEST_ANON_KEY: $e');
+      throw Exception('Failed to decode project slug from NESTCORE_ANON_KEY: $e');
     }
   }
 

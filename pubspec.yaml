@@ -1,8 +1,8 @@
-name: orbitnest_studio_flutter
-description: Official Flutter SDK for OrbitNest Studio — auth (MFA, passkeys, SMS), Postgres queries, realtime, storage, and vector search for your backend.
-version: 1.8.0
-homepage: https://studio.orbitnest.io
-repository: https://github.com/Orbitnest/orbitnest_studio_flutter
+name: nestcore_flutter
+description: Official Flutter SDK for NestCore — auth (MFA, passkeys, SMS), Postgres queries, realtime, storage, and vector search for your backend.
+version: 1.9.0
+homepage: https://nestcore.io
+repository: https://github.com/Orbitnest/nestcore_flutter
 
 
 environment:

@@ -8,13 +8,13 @@ import 'interceptors/logging_interceptor.dart';
 import 'interceptors/retry_interceptor.dart';
 import '../utils/retry_policy.dart';
 
-/// HTTP client for OrbitNest Studio API calls
-class OrbitNestHttpClient {
+/// HTTP client for NestCore API calls
+class NestCoreHttpClient {
   late final Dio _dio;
   final String baseUrl;
   final TokenManager _tokenManager;
 
-  OrbitNestHttpClient({
+  NestCoreHttpClient({
     required this.baseUrl,
     required TokenManager tokenManager,
   }) : _tokenManager = tokenManager {
@@ -29,7 +29,7 @@ class OrbitNestHttpClient {
         'Accept': 'application/json',
         // Security headers
         'X-Requested-With': 'XMLHttpRequest',
-        'X-Client-Info': 'orbitnest-flutter/${OrbitNestConstants.version}',
+        'X-Client-Info': 'nestcore-flutter/${NestCoreConstants.version}',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',

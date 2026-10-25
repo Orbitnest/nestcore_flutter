@@ -1,5 +1,5 @@
-name: orbitnest_studio_flutter_example
-description: Minimal example for the orbitnest_studio_flutter package.
+name: nestcore_flutter_example
+description: Minimal example for the nestcore_flutter package.
 publish_to: none
 version: 1.0.0
 
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  orbitnest_studio_flutter:
+  nestcore_flutter:
     path: ../
 
 flutter:

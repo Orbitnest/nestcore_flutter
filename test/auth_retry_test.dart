@@ -11,10 +11,10 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/auth/models/session.dart';
-import 'package:orbitnest_studio_flutter/src/auth/models/user.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/token_manager.dart';
-import 'package:orbitnest_studio_flutter/src/client/interceptors/auth_interceptor.dart';
+import 'package:nestcore_flutter/src/auth/models/session.dart';
+import 'package:nestcore_flutter/src/auth/models/user.dart';
+import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
+import 'package:nestcore_flutter/src/client/interceptors/auth_interceptor.dart';
 
 String _jwt(String sub, Duration ttl) {
   String b64(Map<String, dynamic> m) =>

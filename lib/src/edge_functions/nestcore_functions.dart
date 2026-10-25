@@ -8,7 +8,7 @@ import 'exceptions/function_exception.dart';
 
 /// Simplified Edge Functions API that wraps the BLoC pattern
 /// Provides direct async methods for function invocation only
-class OrbitNestFunctions extends ChangeNotifier {
+class NestCoreFunctions extends ChangeNotifier {
   final FunctionsBloc _functionsBloc;
   late final StreamSubscription _stateSubscription;
 
@@ -19,7 +19,7 @@ class OrbitNestFunctions extends ChangeNotifier {
   final Map<String, String> _operationFunctionNames = {};
   int _operationCounter = 0;
 
-  OrbitNestFunctions(this._functionsBloc) {
+  NestCoreFunctions(this._functionsBloc) {
     _stateSubscription = _functionsBloc.stream.listen(_handleStateChange);
     _currentState = _functionsBloc.state;
   }

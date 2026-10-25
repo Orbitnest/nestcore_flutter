@@ -6,11 +6,11 @@ import 'package:dio/dio.dart';
 
 /// Service for handling edge functions API calls
 class FunctionsService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
   FunctionsService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String projectSlug,
   }) : _httpClient = httpClient,
        _projectSlug = projectSlug;

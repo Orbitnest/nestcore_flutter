@@ -1,4 +1,4 @@
-import '../analytics/orbitnest_analytics.dart';
+import '../analytics/nestcore_analytics.dart';
 import '../analytics/services/analytics_service.dart';
 import 'dart:async';
 import '../auth/bloc/auth_bloc.dart';
@@ -6,31 +6,31 @@ import '../auth/bloc/auth_state.dart';
 import '../auth/repositories/auth_repository.dart';
 import '../auth/services/auth_service.dart';
 import '../auth/services/token_manager.dart';
-import '../auth/orbitnest_auth.dart';
+import '../auth/nestcore_auth.dart';
 import '../database/bloc/database_bloc.dart';
 import '../database/repositories/database_repository.dart';
 import '../database/services/database_service.dart';
 import '../database/services/query_builder.dart';
-import '../database/orbitnest_database.dart';
+import '../database/nestcore_database.dart';
 import '../edge_functions/bloc/functions_bloc.dart';
 import '../edge_functions/repositories/functions_repository.dart';
 import '../edge_functions/services/functions_service.dart';
-import '../edge_functions/orbitnest_functions.dart';
-import '../ai/orbitnest_ai.dart';
+import '../edge_functions/nestcore_functions.dart';
+import '../ai/nestcore_ai.dart';
 import '../ai/ai_data.dart';
 import '../jobs/services/jobs_service.dart';
 import '../migrations/services/migration_service.dart';
-import '../realtime/orbitnest_realtime.dart';
-import '../storage/orbitnest_storage.dart';
+import '../realtime/nestcore_realtime.dart';
+import '../storage/nestcore_storage.dart';
 import '../utils/env_config.dart';
 import 'http_client.dart';
 
-/// Main client for OrbitNest Studio
-class OrbitNestClient {
+/// Main client for NestCore
+class NestCoreClient {
   late final String _baseUrl;
   late final String _projectSlug;
   late final String _anonKey;
-  late final OrbitNestHttpClient _httpClient;
+  late final NestCoreHttpClient _httpClient;
   late final TokenManager _tokenManager;
 
   // Services
@@ -52,18 +52,18 @@ class OrbitNestClient {
   late final FunctionsBloc _functionsBloc;
 
   // Simplified API wrappers
-  late final OrbitNestAuth _auth;
-  late final OrbitNestDatabase _database;
-  late final OrbitNestFunctions _functions;
-  late final OrbitNestRealtime _realtime;
-  late final OrbitNestAnalytics _analytics;
-  late final OrbitNestStorage _storage;
-  late final OrbitNestAi _ai;
-  late final OrbitNestMemory _memory;
-  late final OrbitNestCollections _collections;
+  late final NestCoreAuth _auth;
+  late final NestCoreDatabase _database;
+  late final NestCoreFunctions _functions;
+  late final NestCoreRealtime _realtime;
+  late final NestCoreAnalytics _analytics;
+  late final NestCoreStorage _storage;
+  late final NestCoreAi _ai;
+  late final NestCoreMemory _memory;
+  late final NestCoreCollections _collections;
   late final StreamSubscription<AuthState> _authSubscription;
 
-  OrbitNestClient._({
+  NestCoreClient._({
     required String baseUrl,
     required String projectSlug,
     required String anonKey,
@@ -73,10 +73,10 @@ class OrbitNestClient {
     _initialize();
   }
 
-  /// Create a new OrbitNest client using environment configuration.
+  /// Create a new NestCore client using environment configuration.
   ///
-  /// Only [anonKey] is required (read from `ORBITNEST_ANON_KEY` in `.env`).
-  /// The base URL is hardcoded to `https://api.orbitnest.io` and the project
+  /// Only [anonKey] is required (read from `NESTCORE_ANON_KEY` in `.env`).
+  /// The base URL is hardcoded to `https://api.nestcore.io` and the project
   /// slug is automatically decoded from the anon key JWT payload — no other
   /// env vars are needed.
   ///
@@ -84,19 +84,19 @@ class OrbitNestClient {
   /// belongs in a mobile app. The service-role key is a server-side admin
   /// credential and must NEVER be bundled into a shipped app — it is not
   /// accepted here by design.
-  factory OrbitNestClient.create({
+  factory NestCoreClient.create({
     String? anonKey,
   }) {
     if (!EnvConfig.isInitialized) {
       throw Exception(
-        'EnvConfig not initialized. Call EnvConfig.initialize() before creating OrbitNestClient.',
+        'EnvConfig not initialized. Call EnvConfig.initialize() before creating NestCoreClient.',
       );
     }
 
     final resolvedAnonKey = anonKey ?? EnvConfig.anonKey;
     final resolvedSlug = EnvConfig.decodeProjectSlugFromJwt(resolvedAnonKey);
 
-    return OrbitNestClient._(
+    return NestCoreClient._(
       baseUrl: EnvConfig.baseUrl,
       projectSlug: resolvedSlug,
       anonKey: resolvedAnonKey,
@@ -114,7 +114,7 @@ class OrbitNestClient {
     _tokenManager.storeApiKey(_anonKey).ignore();
 
     // Initialize HTTP client
-    _httpClient = OrbitNestHttpClient(
+    _httpClient = NestCoreHttpClient(
       baseUrl: _baseUrl,
       tokenManager: _tokenManager,
     );
@@ -149,7 +149,7 @@ class OrbitNestClient {
       httpClient: _httpClient,
       baseUrl: _baseUrl,
     );
-    _analytics = OrbitNestAnalytics(_analyticsService);
+    _analytics = NestCoreAnalytics(_analyticsService);
 
     // Initialize repositories
     _authRepository = AuthRepository(authService: _authService);
@@ -167,10 +167,10 @@ class OrbitNestClient {
     _functionsBloc = FunctionsBloc(functionsRepository: _functionsRepository);
 
     // Initialize simplified API wrappers
-    _auth = OrbitNestAuth(_authBloc, _authService, _tokenManager);
-    _database = OrbitNestDatabase(_databaseBloc, _databaseService);
-    _functions = OrbitNestFunctions(_functionsBloc);
-    _realtime = OrbitNestRealtime(
+    _auth = NestCoreAuth(_authBloc, _authService, _tokenManager);
+    _database = NestCoreDatabase(_databaseBloc, _databaseService);
+    _functions = NestCoreFunctions(_functionsBloc);
+    _realtime = NestCoreRealtime(
       baseUrl: _baseUrl,
       projectSlug: _projectSlug,
       apiKey: _anonKey,
@@ -198,24 +198,24 @@ class OrbitNestClient {
         _realtime.reconnect();
       }
     });
-    _storage = OrbitNestStorage(
+    _storage = NestCoreStorage(
       httpClient: _httpClient,
       baseUrl: _baseUrl,
       projectSlug: _projectSlug,
     );
-    _ai = OrbitNestAi(httpClient: _httpClient, projectSlug: _projectSlug);
-    _memory = OrbitNestMemory(httpClient: _httpClient, projectSlug: _projectSlug);
-    _collections = OrbitNestCollections(httpClient: _httpClient, projectSlug: _projectSlug);
+    _ai = NestCoreAi(httpClient: _httpClient, projectSlug: _projectSlug);
+    _memory = NestCoreMemory(httpClient: _httpClient, projectSlug: _projectSlug);
+    _collections = NestCoreCollections(httpClient: _httpClient, projectSlug: _projectSlug);
   }
 
   /// Get the authentication API (simplified interface)
-  OrbitNestAuth get auth => _auth;
+  NestCoreAuth get auth => _auth;
 
   /// Get the database API (simplified interface)
-  OrbitNestDatabase get database => _database;
+  NestCoreDatabase get database => _database;
 
   /// Get the functions API (simplified interface)
-  OrbitNestFunctions get functions => _functions;
+  NestCoreFunctions get functions => _functions;
 
   /// Get the realtime API — create live subscriptions and broadcasts.
   ///
@@ -227,40 +227,40 @@ class OrbitNestClient {
   ///       callback: (e) => print(e.newRow))
   ///   ..subscribe();
   /// ```
-  OrbitNestRealtime get realtime => _realtime;
+  NestCoreRealtime get realtime => _realtime;
 
   /// Get the storage API — `client.storage.from('bucket').upload(...)`,
   /// `download`, `list`, `remove`, and `getPublicUrl` (with image transforms).
-  OrbitNestStorage get storage => _storage;
+  NestCoreStorage get storage => _storage;
 
   /// AI Gateway — `client.ai.chat(...)`, `chatStream(...)`, `embed(...)`,
   /// `models()` with the project's own provider keys.
-  OrbitNestAi get ai => _ai;
+  NestCoreAi get ai => _ai;
 
   /// Memory API — facts about the signed-in user with semantic search:
   /// `client.memory.add(...)`, `search(...)`, `forget()`.
-  OrbitNestMemory get memory => _memory;
+  NestCoreMemory get memory => _memory;
 
   /// Vector collections — `client.collections.from('handbook').ingest(...)`
   /// and hybrid `search(...)`.
-  OrbitNestCollections get collections => _collections;
+  NestCoreCollections get collections => _collections;
 
   /// Convenience shortcut: create a realtime channel directly on the client.
   RealtimeChannel channel(String name) => _realtime.channel(name);
 
-  /// Background jobs live behind the Studio admin API (admin JWT + project
-  /// UUID); an app's anon key or user token always gets 401 here.
+  /// Background jobs live behind the NestCore console's admin API (admin JWT +
+  /// project UUID); an app's anon key or user token always gets 401 here.
   @Deprecated('Not callable from a client app — every call returns 401. '
-      'Trigger jobs from Studio, the CLI or a server. Will be removed.')
+      'Trigger jobs from the NestCore console, the CLI or a server. Will be removed.')
   JobsService get jobs => _jobsService;
 
   /// The migration routes this calls do not exist on the API (404).
   @Deprecated('No such API route — every call fails with 404. Run migrations '
-      'with the OrbitNest CLI or Studio. Will be removed.')
+      'with the NestCore CLI or console. Will be removed.')
   MigrationService get migrations => _migrationService;
 
   /// Get the analytics API — track events, screens, crashes, and user identity.
-  OrbitNestAnalytics get analytics => _analytics;
+  NestCoreAnalytics get analytics => _analytics;
 
   /// Stream that emits whenever the server has decisively rejected the
   /// current session — e.g. a 401 on a data/edge-function call that even a
@@ -277,7 +277,7 @@ class OrbitNestClient {
   // ============================
 
   /// Invoke an edge function directly
-  /// Usage: orbitnest.function('my-function', params: {...})
+  /// Usage: nestcore.function('my-function', params: {...})
   Future<dynamic> function(
     String functionName, {
     dynamic params,
@@ -298,7 +298,7 @@ class OrbitNestClient {
   // ============================
 
   /// Select data from a table
-  /// Usage: orbitnest.select('users', filters: {'status': 'active'})
+  /// Usage: nestcore.select('users', filters: {'status': 'active'})
   Future<List<Map<String, dynamic>>> select(
     String table, {
     String columns = '*',
@@ -319,7 +319,7 @@ class OrbitNestClient {
   }
 
   /// Insert data into a table
-  /// Usage: orbitnest.insert('users', {'name': 'John', 'email': 'john@example.com'})
+  /// Usage: nestcore.insert('users', {'name': 'John', 'email': 'john@example.com'})
   Future<List<Map<String, dynamic>>> insert(
     String table,
     Map<String, dynamic> values, {
@@ -330,7 +330,7 @@ class OrbitNestClient {
   }
 
   /// Update data in a table
-  /// Usage: orbitnest.update('users', {'name': 'Jane'}, filters: {'id': 1})
+  /// Usage: nestcore.update('users', {'name': 'Jane'}, filters: {'id': 1})
   Future<List<Map<String, dynamic>>> update(
     String table,
     Map<String, dynamic> values, {
@@ -341,7 +341,7 @@ class OrbitNestClient {
   }
 
   /// Delete data from a table
-  /// Usage: orbitnest.delete('users', filters: {'id': 1})
+  /// Usage: nestcore.delete('users', filters: {'id': 1})
   Future<List<Map<String, dynamic>>> delete(
     String table, {
     required Map<String, dynamic> filters,
@@ -351,7 +351,7 @@ class OrbitNestClient {
   }
 
   /// Execute raw SQL query
-  /// Usage: orbitnest.sql(r'SELECT * FROM users WHERE status = $1', parameters: ['active'])
+  /// Usage: nestcore.sql(r'SELECT * FROM users WHERE status = $1', parameters: ['active'])
   Future<List<Map<String, dynamic>>> sql(
     String query, {
     List<dynamic>? parameters,
@@ -365,14 +365,14 @@ class OrbitNestClient {
   // ============================
 
   /// Sign in with email and password
-  /// Usage: orbitnest.signIn('user@example.com', 'password')
+  /// Usage: nestcore.signIn('user@example.com', 'password')
   Future<Map<String, dynamic>> signIn(String email, String password) async {
     return await _auth.signInWithPassword(email: email, password: password);
   }
 
   /// Sign up with email and password
   /// Optionally pass [metadata] (e.g. display_name) to store in user_metadata.
-  /// Usage: orbitnest.signUp('user@example.com', 'password', metadata: {'display_name': 'Alice'})
+  /// Usage: nestcore.signUp('user@example.com', 'password', metadata: {'display_name': 'Alice'})
   Future<Map<String, dynamic>> signUp(
     String email,
     String password, {
@@ -382,20 +382,20 @@ class OrbitNestClient {
   }
 
   /// Sign out the current user
-  /// Usage: orbitnest.signOut()
+  /// Usage: nestcore.signOut()
   Future<void> signOut() async {
     await _auth.signOut();
   }
 
   /// Get the current user
-  /// Usage: orbitnest.currentUser()
+  /// Usage: nestcore.currentUser()
   Map<String, dynamic>? currentUser() {
     final user = _auth.currentUser;
     return user?.toJson();
   }
 
   /// Get the current session
-  /// Usage: orbitnest.currentSession()
+  /// Usage: nestcore.currentSession()
   Map<String, dynamic>? currentSession() {
     final session = _auth.currentSession;
     return session?.toJson();

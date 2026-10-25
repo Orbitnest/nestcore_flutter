@@ -1,7 +1,7 @@
 import '../../client/interceptors/error_interceptor.dart';
 
 /// Migration-specific exception.
-class MigrationException extends OrbitNestException {
+class MigrationException extends NestCoreException {
   const MigrationException(
     super.message, {
     super.code,
@@ -11,7 +11,7 @@ class MigrationException extends OrbitNestException {
   factory MigrationException.fromException(dynamic error) {
     if (error is MigrationException) return error;
 
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return MigrationException(
         error.message,
         code: error.code,

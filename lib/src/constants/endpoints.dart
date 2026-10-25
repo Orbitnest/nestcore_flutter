@@ -1,4 +1,4 @@
-/// API endpoint constants for OrbitNest Studio
+/// API endpoint constants for NestCore
 class Endpoints {
   // Admin Authentication
   static const String adminRequestVerification =

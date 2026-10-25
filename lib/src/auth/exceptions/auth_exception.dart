@@ -3,7 +3,7 @@ import '../../client/interceptors/error_interceptor.dart';
 import '../../constants/error_codes.dart';
 
 /// Authentication-specific exception
-class AuthException extends OrbitNestException {
+class AuthException extends NestCoreException {
   const AuthException(
     super.message, {
     super.code,
@@ -19,7 +19,7 @@ class AuthException extends OrbitNestException {
       return error;
     }
 
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       // Convert timeout errors to more specific auth timeout
       if (error.code == ErrorCodes.connectionTimeout || 
           error.code == ErrorCodes.sendTimeout || 
@@ -37,12 +37,12 @@ class AuthException extends OrbitNestException {
       );
     }
 
-    // Dio wraps the OrbitNestException built by ErrorInterceptor; unwrap it so
+    // Dio wraps the NestCoreException built by ErrorInterceptor; unwrap it so
     // the HTTP status survives (the refresh path relies on it, B-sdk-flutter-08).
     if (error is DioException) {
       final inner = error.error;
-      if (inner is OrbitNestException) {
-        return AuthException.fromException(OrbitNestException(
+      if (inner is NestCoreException) {
+        return AuthException.fromException(NestCoreException(
           inner.message,
           code: inner.code,
           statusCode: inner.statusCode ?? error.response?.statusCode,

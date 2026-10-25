@@ -67,10 +67,40 @@ class TokenManager {
     }
   }
 
+  /// Read [key] from secure storage, after moving any pre-1.9.0
+  /// `orbitnest_*` keys over (see [_migrateLegacyKeys]).
+  Future<String?> _read(String key) async {
+    await (_legacyMigration ??= _migrateLegacyKeys());
+    return _secureStorage.read(key: key);
+  }
+
+  Future<void>? _legacyMigration;
+
+  /// One-time move of the pre-rename `orbitnest_*` secure-storage keys
+  /// ([NestCoreConstants.legacyStorageKeys]) to their `nestcore_*` names, so
+  /// users who update from `orbitnest_studio_flutter` stay signed in. A legacy
+  /// value is copied only when the new key is empty, then the legacy key is
+  /// deleted. Failures are logged and leave the legacy key for the next run.
+  Future<void> _migrateLegacyKeys() async {
+    for (final entry in NestCoreConstants.legacyStorageKeys.entries) {
+      try {
+        final legacy = await _secureStorage.read(key: entry.value);
+        if (legacy == null) continue;
+        final current = await _secureStorage.read(key: entry.key);
+        if ((current == null || current.isEmpty) && legacy.isNotEmpty) {
+          await _secureStorage.write(key: entry.key, value: legacy);
+        }
+        await _secureStorage.delete(key: entry.value);
+      } catch (e) {
+        NestCoreLogger.error('Failed to migrate legacy storage key', e);
+      }
+    }
+  }
+
   /// Store session securely.
   Future<void> storeSession(Session session) async {
     if (session.accessToken.isEmpty) {
-      OrbitNestLogger.error('storeSession: empty access token, skipping', null);
+      NestCoreLogger.error('storeSession: empty access token, skipping', null);
       return;
     }
 
@@ -83,9 +113,9 @@ class TokenManager {
     // a partial update can never destroy session persistence.
     if (session.refreshToken.isEmpty) {
       final existing = _cachedRefreshToken ??
-          await _secureStorage.read(key: OrbitNestConstants.refreshTokenKey);
+          await _read(NestCoreConstants.refreshTokenKey);
       if (existing != null && existing.isNotEmpty) {
-        OrbitNestLogger.error(
+        NestCoreLogger.error(
           'storeSession: incoming session has empty refresh token — '
           'preserving the existing one',
           null,
@@ -111,24 +141,24 @@ class TokenManager {
 
       await Future.wait([
         _secureStorage.write(
-          key: OrbitNestConstants.sessionKey,
+          key: NestCoreConstants.sessionKey,
           value: sessionJson,
         ),
         _secureStorage.write(
-          key: '${OrbitNestConstants.sessionKey}_checksum',
+          key: '${NestCoreConstants.sessionKey}_checksum',
           value: checksum,
         ),
         _secureStorage.write(
-          key: OrbitNestConstants.accessTokenKey,
+          key: NestCoreConstants.accessTokenKey,
           value: session.accessToken,
         ),
         _secureStorage.write(
-          key: OrbitNestConstants.refreshTokenKey,
+          key: NestCoreConstants.refreshTokenKey,
           value: session.refreshToken,
         ),
       ]);
     } catch (e) {
-      OrbitNestLogger.error('Failed to persist session to storage', e);
+      NestCoreLogger.error('Failed to persist session to storage', e);
       // Do not re-throw.  In-memory cache is already updated, so the current
       // session remains usable.  The next app restart will re-run /auth/refresh.
     }
@@ -141,9 +171,7 @@ class TokenManager {
   /// unrecoverable storage state).
   Future<Session?> getStoredSession() async {
     try {
-      final sessionJson = await _secureStorage.read(
-        key: OrbitNestConstants.sessionKey,
-      );
+      final sessionJson = await _read(NestCoreConstants.sessionKey);
 
       if (sessionJson == null) return null;
 
@@ -151,13 +179,11 @@ class TokenManager {
       // tampering. Log a warning but continue so the server can validate the
       // refresh token via /auth/refresh. Wiping here would silently log users
       // out on any secure-storage write anomaly.
-      final storedChecksum = await _secureStorage.read(
-        key: '${OrbitNestConstants.sessionKey}_checksum',
-      );
+      final storedChecksum = await _read('${NestCoreConstants.sessionKey}_checksum');
       if (storedChecksum != null) {
         final currentChecksum = _generateChecksum(sessionJson);
         if (storedChecksum != currentChecksum) {
-          OrbitNestLogger.error(
+          NestCoreLogger.error(
             'getStoredSession: checksum mismatch — storage may be corrupt; '
             'proceeding to allow server-side refresh',
             null,
@@ -175,7 +201,7 @@ class TokenManager {
 
       // Without a refresh token there is nothing to recover with.
       if (session.refreshToken.isEmpty) {
-        OrbitNestLogger.error('getStoredSession: empty refresh token — clearing session', null);
+        NestCoreLogger.error('getStoredSession: empty refresh token — clearing session', null);
         await clearSession();
         return null;
       }
@@ -191,7 +217,7 @@ class TokenManager {
       // Transient errors (e.g. iOS secure storage initialising, disk pressure)
       // should not permanently log the user out. Log and return null so the
       // next attempt can succeed.
-      OrbitNestLogger.error('getStoredSession: failed to read/decode session', e);
+      NestCoreLogger.error('getStoredSession: failed to read/decode session', e);
       return null;
     }
   }
@@ -216,7 +242,7 @@ class TokenManager {
         _cachedAccessToken = null;
       }
       // Fall through to secure storage — maybe a refresh already wrote a new one.
-      final token = await _secureStorage.read(key: OrbitNestConstants.accessTokenKey);
+      final token = await _read(NestCoreConstants.accessTokenKey);
       if (token != null && !isTokenExpired(token)) {
         _cachedAccessToken = token;
         return token;
@@ -229,7 +255,7 @@ class TokenManager {
         final refreshed = await refreshSession();
         if (refreshed) {
           final newToken = _cachedAccessToken ??
-              await _secureStorage.read(key: OrbitNestConstants.accessTokenKey);
+              await _read(NestCoreConstants.accessTokenKey);
           if (newToken != null && !isTokenExpired(newToken)) {
             _cachedAccessToken = newToken;
             return newToken;
@@ -254,7 +280,7 @@ class TokenManager {
         return _cachedRefreshToken;
       }
       // Otherwise read from secure storage and cache it
-      final token = await _secureStorage.read(key: OrbitNestConstants.refreshTokenKey);
+      final token = await _read(NestCoreConstants.refreshTokenKey);
       if (token != null) {
         _cachedRefreshToken = token;
       }
@@ -269,7 +295,7 @@ class TokenManager {
     if (_apiKey != null) return _apiKey;
 
     try {
-      return await _secureStorage.read(key: OrbitNestConstants.apiKeyKey);
+      return await _read(NestCoreConstants.apiKeyKey);
     } catch (e) {
       return null;
     }
@@ -279,7 +305,7 @@ class TokenManager {
   Future<void> storeApiKey(String apiKey) async {
     try {
       await _secureStorage.write(
-        key: OrbitNestConstants.apiKeyKey,
+        key: NestCoreConstants.apiKeyKey,
         value: apiKey,
       );
     } catch (e) {
@@ -292,13 +318,27 @@ class TokenManager {
   /// Cleared automatically by clearSession() once sign-out completes.
   void markSigningOut() => _isSigningOut = true;
 
+  static const List<String> _sessionKeys = [
+    NestCoreConstants.sessionKey,
+    '${NestCoreConstants.sessionKey}_checksum',
+    NestCoreConstants.accessTokenKey,
+    NestCoreConstants.refreshTokenKey,
+  ];
+
   /// Clear all stored authentication data
   Future<void> clearSession() async {
     try {
+      // Let an in-flight legacy-key migration finish first so it cannot copy
+      // the old session back after it is deleted below.
+      await (_legacyMigration ??= _migrateLegacyKeys());
       await Future.wait([
-        _secureStorage.delete(key: OrbitNestConstants.sessionKey),
-        _secureStorage.delete(key: OrbitNestConstants.accessTokenKey),
-        _secureStorage.delete(key: OrbitNestConstants.refreshTokenKey),
+        _secureStorage.delete(key: NestCoreConstants.sessionKey),
+        _secureStorage.delete(key: NestCoreConstants.accessTokenKey),
+        _secureStorage.delete(key: NestCoreConstants.refreshTokenKey),
+        // Pre-1.9.0 session keys too, or the next read would migrate the old
+        // session back and sign the user in again.
+        for (final key in _sessionKeys)
+          _secureStorage.delete(key: NestCoreConstants.legacyStorageKeys[key]!),
       ]);
 
       // Clear cached tokens
@@ -420,7 +460,7 @@ class TokenManager {
       _lastRefreshFailedTransiently = false;
       return ok;
     } catch (e) {
-      OrbitNestLogger.error('Token refresh failed (transient)', e);
+      NestCoreLogger.error('Token refresh failed (transient)', e);
       _lastRefreshFailedTransiently = true;
       return false;
     }
@@ -431,7 +471,7 @@ class TokenManager {
     try {
       if (projectSlug != null) {
         await _secureStorage.write(
-          key: OrbitNestConstants.projectSlugKey,
+          key: NestCoreConstants.projectSlugKey,
           value: projectSlug,
         );
       }
@@ -445,7 +485,7 @@ class TokenManager {
     if (_projectSlug != null) return _projectSlug;
 
     try {
-      return await _secureStorage.read(key: OrbitNestConstants.projectSlugKey);
+      return await _read(NestCoreConstants.projectSlugKey);
     } catch (e) {
       return null;
     }

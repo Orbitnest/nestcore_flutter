@@ -13,7 +13,7 @@ import 'services/passkey_authenticator_service.dart';
 
 /// Simplified Auth API that wraps the BLoC pattern
 /// Provides direct async methods like Supabase
-class OrbitNestAuth extends ChangeNotifier {
+class NestCoreAuth extends ChangeNotifier {
   final AuthBloc _authBloc;
   final AuthService _authService;
   final TokenManager _tokenManager;
@@ -23,7 +23,7 @@ class OrbitNestAuth extends ChangeNotifier {
   final Map<String, Completer<dynamic>> _pendingOperations = {};
   Session? _lastKnownSession;
 
-  OrbitNestAuth(
+  NestCoreAuth(
     this._authBloc,
     this._authService,
     this._tokenManager,
@@ -356,7 +356,7 @@ class OrbitNestAuth extends ChangeNotifier {
     // Update this TokenManager's in-memory cache directly after a successful
     // refresh. The AuthBloc's own storeSession() call may have targeted a
     // different TokenManager instance (custom DI setups where AuthBloc and
-    // OrbitNestAuth are wired separately), so we call it here too — idempotent
+    // NestCoreAuth are wired separately), so we call it here too — idempotent
     // when they share the same instance.
     try {
       final raw = result['session'];
@@ -406,7 +406,7 @@ class OrbitNestAuth extends ChangeNotifier {
 
   /// Register a new passkey for the currently authenticated user.
   /// Drives the native registration ceremony and posts the attestation back
-  /// to the OrbitNest server.
+  /// to the NestCore server.
   Future<PasskeyDevice> registerPasskey({String? deviceName}) async {
     final result = await _executeWithCompleter<Map<String, dynamic>>(
       'passkey_registered',

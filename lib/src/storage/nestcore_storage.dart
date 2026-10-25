@@ -31,13 +31,13 @@ class StorageTransform {
 }
 
 /// Storage facade — `client.storage.from('bucket')` returns a [StorageBucket].
-class OrbitNestStorage {
-  final OrbitNestHttpClient _httpClient;
+class NestCoreStorage {
+  final NestCoreHttpClient _httpClient;
   final String _baseUrl;
   final String _projectSlug;
 
-  OrbitNestStorage({
-    required OrbitNestHttpClient httpClient,
+  NestCoreStorage({
+    required NestCoreHttpClient httpClient,
     required String baseUrl,
     required String projectSlug,
   })  : _httpClient = httpClient,
@@ -50,13 +50,13 @@ class OrbitNestStorage {
 
 /// Operations scoped to a single storage bucket.
 class StorageBucket {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _baseUrl;
   final String _projectSlug;
   final String _bucket;
 
   StorageBucket({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String baseUrl,
     required String projectSlug,
     required String bucket,

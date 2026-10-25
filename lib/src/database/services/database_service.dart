@@ -8,11 +8,11 @@ import '../exceptions/database_exception.dart';
 
 /// Service for handling database API calls
 class DatabaseService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
   DatabaseService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String projectSlug,
   }) : _httpClient = httpClient,
        _projectSlug = projectSlug;
@@ -45,7 +45,7 @@ class DatabaseService {
   }
 
   /// Rows of [table] nearest to [query] by meaning, from a column embedded
-  /// with automatic embeddings (Studio → AI → Embeddings). Runs under RLS.
+  /// with automatic embeddings (NestCore → AI → Embeddings). Runs under RLS.
   /// Needs a signed-in user or the service key.
   Future<SemanticResponse> semantic({
     required String table,
@@ -207,7 +207,7 @@ class DatabaseService {
     if (op == 'eq' && value == null) op = 'is';
     if (!supportedFilterOperators.contains(op)) {
       throw UnsupportedError(
-          'Filter operator "$operator" is not supported by the OrbitNest data API. '
+          'Filter operator "$operator" is not supported by the NestCore data API. '
           'Supported: ${supportedFilterOperators.join(', ')}. Use database.sql() for other queries.');
     }
     if (!_identifier.hasMatch(column)) {
@@ -427,14 +427,14 @@ class DatabaseService {
   static ({String column, bool ascending})? parseOrder(List<String>? orders) {
     if (orders == null || orders.isEmpty) return null;
     if (orders.length > 1) {
-      throw UnsupportedError('The OrbitNest data API sorts by one column only (got $orders)');
+      throw UnsupportedError('The NestCore data API sorts by one column only (got $orders)');
     }
     final parts = orders.single.split('.');
     return (column: parts.first.trim(), ascending: !parts.contains('desc'));
   }
 
   static UnsupportedError upsertUnsupported() => UnsupportedError(
-      'Upsert is not supported by the OrbitNest data API. '
+      'Upsert is not supported by the NestCore data API. '
       'Insert, catch the duplicate-key DatabaseException, then update.');
 
   static final _identifier = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');

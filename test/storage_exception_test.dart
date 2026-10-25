@@ -3,11 +3,11 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/orbitnest_studio_flutter.dart';
-import 'package:orbitnest_studio_flutter/src/client/http_client.dart';
+import 'package:nestcore_flutter/nestcore_flutter.dart';
+import 'package:nestcore_flutter/src/client/http_client.dart';
 
 /// Throws what Dio + ErrorInterceptor produce for an API error response.
-class _FailingHttpClient implements OrbitNestHttpClient {
+class _FailingHttpClient implements NestCoreHttpClient {
   _FailingHttpClient(this.status, this.body, {this.asBytes = false});
   final int status;
   final Map<String, dynamic> body;
@@ -24,8 +24,8 @@ class _FailingHttpClient implements OrbitNestHttpClient {
         data: asBytes ? utf8.encode(jsonEncode(body)) : body,
       ),
       error: asBytes
-          ? OrbitNestException('Not Found', code: 'NOT_FOUND', statusCode: status)
-          : OrbitNestException(body['message'] as String, code: body['code'] as String?, statusCode: status, body: body),
+          ? NestCoreException('Not Found', code: 'NOT_FOUND', statusCode: status)
+          : NestCoreException(body['message'] as String, code: body['code'] as String?, statusCode: status, body: body),
     );
   }
 
@@ -43,7 +43,7 @@ class _FailingHttpClient implements OrbitNestHttpClient {
 }
 
 StorageBucket _bucket(_FailingHttpClient http) =>
-    OrbitNestStorage(httpClient: http, baseUrl: 'https://api.test', projectSlug: 'p').from('avatars');
+    NestCoreStorage(httpClient: http, baseUrl: 'https://api.test', projectSlug: 'p').from('avatars');
 
 void main() {
   test('upload over quota throws StorageException with the API code and body', () async {
@@ -62,7 +62,7 @@ void main() {
       expect(e.code, 'QUOTA_EXCEEDED');
       expect(e.message, 'Storage quota exceeded');
       expect(e.body?['limit'], 1024);
-      expect(e, isA<OrbitNestException>());
+      expect(e, isA<NestCoreException>());
     }
   });
 

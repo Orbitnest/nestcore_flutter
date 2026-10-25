@@ -11,7 +11,7 @@
 // refreshSession() only touches the registered callback + the in-flight guard
 // (no secure storage / platform channels), so it runs as a plain unit test.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/token_manager.dart';
+import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
 
 void main() {
   group('TokenManager.refreshSession de-duplication', () {

@@ -8,11 +8,11 @@ import '../exceptions/auth_exception.dart';
 
 /// Service for handling authentication API calls
 class AuthService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _projectSlug;
 
   AuthService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String projectSlug,
   })  : _httpClient = httpClient,
         _projectSlug = projectSlug;

@@ -1,15 +1,27 @@
-/// General constants for OrbitNest Studio package
-class OrbitNestConstants {
+/// General constants for NestCore package
+class NestCoreConstants {
   // Package info
-  static const String packageName = 'orbitnest_studio_flutter';
-  static const String version = '1.8.0'; // keep in sync with pubspec.yaml
+  static const String packageName = 'nestcore_flutter';
+  static const String version = '1.9.0'; // keep in sync with pubspec.yaml
 
   // Storage keys
-  static const String accessTokenKey = 'orbitnest_access_token';
-  static const String refreshTokenKey = 'orbitnest_refresh_token';
-  static const String sessionKey = 'orbitnest_session';
-  static const String apiKeyKey = 'orbitnest_api_key';
-  static const String projectSlugKey = 'orbitnest_project_slug';
+  static const String accessTokenKey = 'nestcore_access_token';
+  static const String refreshTokenKey = 'nestcore_refresh_token';
+  static const String sessionKey = 'nestcore_session';
+  static const String apiKeyKey = 'nestcore_api_key';
+  static const String projectSlugKey = 'nestcore_project_slug';
+
+  /// Pre-1.9.0 secure-storage key names. [TokenManager] reads them when the
+  /// matching new key is empty and copies the value over, so apps updated from
+  /// `orbitnest_studio_flutter` keep their signed-in session.
+  static const Map<String, String> legacyStorageKeys = {
+    accessTokenKey: 'orbitnest_access_token',
+    refreshTokenKey: 'orbitnest_refresh_token',
+    sessionKey: 'orbitnest_session',
+    '${sessionKey}_checksum': 'orbitnest_session_checksum',
+    apiKeyKey: 'orbitnest_api_key',
+    projectSlugKey: 'orbitnest_project_slug',
+  };
 
   // Default timeouts (in seconds)
   static const int defaultConnectTimeout = 60;

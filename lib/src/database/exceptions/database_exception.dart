@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import '../../client/interceptors/error_interceptor.dart';
 
 /// Database-specific exception
-class DatabaseException extends OrbitNestException {
+class DatabaseException extends NestCoreException {
   const DatabaseException(
     super.message, {
     super.code,
@@ -24,7 +24,7 @@ class DatabaseException extends OrbitNestException {
       return error;
     }
 
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return DatabaseException(
         error.message,
         code: error.code,
@@ -33,12 +33,12 @@ class DatabaseException extends OrbitNestException {
       );
     }
 
-    // Dio wraps OrbitNestException inside DioException.error after ErrorInterceptor.
+    // Dio wraps NestCoreException inside DioException.error after ErrorInterceptor.
     // Unwrap it so the caller sees the real code (e.g. UNAUTHORIZED) instead of
     // UNKNOWN_DATABASE_ERROR.
     if (error is DioException) {
       final inner = error.error;
-      if (inner is OrbitNestException) {
+      if (inner is NestCoreException) {
         return DatabaseException(
           inner.message,
           code: inner.code,

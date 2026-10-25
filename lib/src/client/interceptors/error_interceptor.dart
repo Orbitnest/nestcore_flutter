@@ -5,35 +5,35 @@ import '../../constants/error_codes.dart';
 class ErrorInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    OrbitNestException exception;
+    NestCoreException exception;
 
     switch (err.type) {
       case DioExceptionType.connectionTimeout:
-        exception = const OrbitNestException(
+        exception = const NestCoreException(
           'Connection timeout',
           code: ErrorCodes.connectionTimeout,
         );
         break;
       case DioExceptionType.sendTimeout:
-        exception = const OrbitNestException(
+        exception = const NestCoreException(
           'Send timeout',
           code: ErrorCodes.sendTimeout,
         );
         break;
       case DioExceptionType.receiveTimeout:
-        exception = const OrbitNestException(
+        exception = const NestCoreException(
           'Receive timeout',
           code: ErrorCodes.receiveTimeout,
         );
         break;
       case DioExceptionType.badCertificate:
-        exception = const OrbitNestException(
+        exception = const NestCoreException(
           'Bad certificate',
           code: ErrorCodes.badCertificate,
         );
         break;
       case DioExceptionType.connectionError:
-        exception = OrbitNestException(
+        exception = NestCoreException(
           'Connection error: ${err.message}',
           code: ErrorCodes.connectionError,
         );
@@ -42,7 +42,7 @@ class ErrorInterceptor extends Interceptor {
         exception = _handleBadResponse(err);
         break;
       case DioExceptionType.cancel:
-        exception = const OrbitNestException(
+        exception = const NestCoreException(
           'Request cancelled',
           code: ErrorCodes.requestCancelled,
         );
@@ -62,7 +62,7 @@ class ErrorInterceptor extends Interceptor {
           message = 'Unknown error: ${err.error}';
         }
         
-        exception = OrbitNestException(
+        exception = NestCoreException(
           message,
           code: code,
         );
@@ -80,7 +80,7 @@ class ErrorInterceptor extends Interceptor {
     );
   }
 
-  OrbitNestException _handleBadResponse(DioException err) {
+  NestCoreException _handleBadResponse(DioException err) {
     final response = err.response;
     final statusCode = response?.statusCode;
     final data = response?.data;
@@ -112,7 +112,7 @@ class ErrorInterceptor extends Interceptor {
       503 => ('Service Unavailable', ErrorCodes.serviceUnavailable),
       _ => ('HTTP Error $statusCode', ErrorCodes.httpError),
     };
-    return OrbitNestException(
+    return NestCoreException(
       message.isEmpty ? fallback : message,
       code: code ?? defaultCode,
       statusCode: statusCode,
@@ -121,9 +121,9 @@ class ErrorInterceptor extends Interceptor {
   }
 }
 
-/// Base exception class for OrbitNest errors
-class OrbitNestException implements Exception {
-  const OrbitNestException(
+/// Base exception class for NestCore errors
+class NestCoreException implements Exception {
+  const NestCoreException(
     this.message, {
     this.code,
     this.statusCode,
@@ -141,8 +141,8 @@ class OrbitNestException implements Exception {
   @override
   String toString() {
     if (code != null) {
-      return 'OrbitNestException($code): $message';
+      return 'NestCoreException($code): $message';
     }
-    return 'OrbitNestException: $message';
+    return 'NestCoreException: $message';
   }
 }

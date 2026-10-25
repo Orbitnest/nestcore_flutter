@@ -2,9 +2,9 @@ import 'dart:developer' as developer;
 
 import 'env_config.dart';
 
-/// Logger service for OrbitNest Studio package
-class OrbitNestLogger {
-  static const String _name = 'OrbitNest';
+/// Logger service for NestCore package
+class NestCoreLogger {
+  static const String _name = 'NestCore';
 
   /// Log debug message
   static void debug(String message, [Object? error, StackTrace? stackTrace]) {

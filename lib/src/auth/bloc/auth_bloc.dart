@@ -484,7 +484,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       // Re-emit AuthAuthenticatedState with the refreshed user so the
       // long-lived bloc state reflects the new profile. Without this,
       // consumers that filter for AuthAuthenticatedState (or rely on
-      // OrbitNestAuth._lastKnownSession, which is only refreshed on
+      // NestCoreAuth._lastKnownSession, which is only refreshed on
       // AuthAuthenticatedState) keep showing the stale user once any
       // subsequent transient state fires.
       if (updatedSession != null) {

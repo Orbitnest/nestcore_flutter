@@ -1,7 +1,7 @@
 // Typed results of the AI data APIs: memory, collections, threads, traces.
 // Rows come back as stored (snake_case); every row model keeps the full
 // decoded map in `raw` for fields added after this SDK version.
-import 'orbitnest_ai.dart' show AiToolCall;
+import 'nestcore_ai.dart' show AiToolCall;
 
 double? _dbl(Object? v) => v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
 int? _intOrNull(Object? v) => v is num ? v.toInt() : (v is String ? int.tryParse(v) : null);

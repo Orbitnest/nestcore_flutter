@@ -1,6 +1,6 @@
 // Regression test for the "one bad function fails every call" bug.
 //
-// OrbitNestFunctions multiplexes concurrent invocations onto a single bloc and
+// NestCoreFunctions multiplexes concurrent invocations onto a single bloc and
 // resolves them from its state stream. The success path routed a result to the
 // one pending operation registered for that function name, but the error path
 // completed EVERY pending operation with whichever function happened to fail.
@@ -12,11 +12,11 @@
 //
 // This pins the routing so a failure only settles its own caller.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/bloc/functions_bloc.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/exceptions/function_exception.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/models/function_response.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/orbitnest_functions.dart';
-import 'package:orbitnest_studio_flutter/src/edge_functions/repositories/functions_repository.dart';
+import 'package:nestcore_flutter/src/edge_functions/bloc/functions_bloc.dart';
+import 'package:nestcore_flutter/src/edge_functions/exceptions/function_exception.dart';
+import 'package:nestcore_flutter/src/edge_functions/models/function_response.dart';
+import 'package:nestcore_flutter/src/edge_functions/nestcore_functions.dart';
+import 'package:nestcore_flutter/src/edge_functions/repositories/functions_repository.dart';
 
 /// Repository stub: `missing` fails fast, everything else succeeds slowly so
 /// the failure lands while the healthy call is still in flight. Only [invoke]
@@ -49,11 +49,11 @@ class _FakeRepository implements FunctionsRepository {
 }
 
 void main() {
-  group('OrbitNestFunctions error routing', () {
-    late OrbitNestFunctions functions;
+  group('NestCoreFunctions error routing', () {
+    late NestCoreFunctions functions;
 
     setUp(() {
-      functions = OrbitNestFunctions(
+      functions = NestCoreFunctions(
         FunctionsBloc(functionsRepository: _FakeRepository()),
       );
     });

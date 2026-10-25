@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import '../../client/interceptors/error_interceptor.dart';
 
 /// Edge function-specific exception
-class FunctionException extends OrbitNestException {
+class FunctionException extends NestCoreException {
   const FunctionException(
     super.message, {
     super.code,
@@ -22,7 +22,7 @@ class FunctionException extends OrbitNestException {
       return error;
     }
 
-    if (error is OrbitNestException) {
+    if (error is NestCoreException) {
       return FunctionException(
         error.message,
         code: error.code,
@@ -32,7 +32,7 @@ class FunctionException extends OrbitNestException {
     }
 
     // ErrorInterceptor wraps the API error (code, message, body) in DioException.error.
-    if (error is DioException && error.error is OrbitNestException) {
+    if (error is DioException && error.error is NestCoreException) {
       return FunctionException.fromException(error.error);
     }
 

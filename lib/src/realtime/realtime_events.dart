@@ -1,4 +1,4 @@
-// Event models for the OrbitNest Realtime subsystem.
+// Event models for the NestCore Realtime subsystem.
 
 enum PgEvent { insert, update, delete, all }
 

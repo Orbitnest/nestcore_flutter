@@ -7,7 +7,7 @@ import 'package:dio/dio.dart';
 
 import '../client/http_client.dart';
 import 'ai_data_models.dart';
-import 'orbitnest_ai.dart';
+import 'nestcore_ai.dart';
 import 'sse.dart';
 
 // Writes are never retried: a resend would add a second row or pay twice.
@@ -62,11 +62,11 @@ Object _content(Object content) {
 /// ```
 ///
 /// Failures throw [AiException].
-class OrbitNestMemory {
-  final OrbitNestHttpClient _http;
+class NestCoreMemory {
+  final NestCoreHttpClient _http;
   final String _slug;
 
-  OrbitNestMemory({required OrbitNestHttpClient httpClient, required String projectSlug})
+  NestCoreMemory({required NestCoreHttpClient httpClient, required String projectSlug})
       : _http = httpClient,
         _slug = projectSlug;
 
@@ -184,11 +184,11 @@ class OrbitNestMemory {
 /// ```
 ///
 /// Failures throw [AiException].
-class OrbitNestCollections {
-  final OrbitNestHttpClient _http;
+class NestCoreCollections {
+  final NestCoreHttpClient _http;
   final String _slug;
 
-  OrbitNestCollections({required OrbitNestHttpClient httpClient, required String projectSlug})
+  NestCoreCollections({required NestCoreHttpClient httpClient, required String projectSlug})
       : _http = httpClient,
         _slug = projectSlug;
 
@@ -245,7 +245,7 @@ class OrbitNestCollections {
 
 /// One collection: `client.collections.from('handbook')`.
 class AiCollectionRef {
-  final OrbitNestHttpClient _http;
+  final NestCoreHttpClient _http;
   final String _slug;
   final String name;
 
@@ -343,10 +343,10 @@ class AiCollectionRef {
 ///
 /// Failures throw [AiException] (`run()` yields a [ThreadRunError] instead).
 class AiThreads {
-  final OrbitNestHttpClient _http;
+  final NestCoreHttpClient _http;
   final String _slug;
 
-  AiThreads({required OrbitNestHttpClient httpClient, required String projectSlug})
+  AiThreads({required NestCoreHttpClient httpClient, required String projectSlug})
       : _http = httpClient,
         _slug = projectSlug;
 
@@ -376,7 +376,7 @@ class AiThreads {
 
 /// One thread: `client.ai.threads.from(id)`.
 class AiThreadRef {
-  final OrbitNestHttpClient _http;
+  final NestCoreHttpClient _http;
   final String _slug;
   final String id;
 

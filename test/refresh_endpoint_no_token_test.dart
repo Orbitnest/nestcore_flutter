@@ -17,8 +17,8 @@
 // were ever removed from the skip-list, this test would fail loudly).
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:orbitnest_studio_flutter/src/auth/services/token_manager.dart';
-import 'package:orbitnest_studio_flutter/src/client/interceptors/auth_interceptor.dart';
+import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
+import 'package:nestcore_flutter/src/client/interceptors/auth_interceptor.dart';
 
 class _CaptureHandler extends RequestInterceptorHandler {
   RequestOptions? captured;

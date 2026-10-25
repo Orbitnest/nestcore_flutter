@@ -7,7 +7,7 @@ const int _kBatchSize = 50;
 const Duration _kFlushDelay = Duration(seconds: 5);
 
 class AnalyticsService {
-  final OrbitNestHttpClient _httpClient;
+  final NestCoreHttpClient _httpClient;
   final String _baseUrl;
 
   final String anonymousId;
@@ -18,7 +18,7 @@ class AnalyticsService {
   Timer? _flushTimer;
 
   AnalyticsService({
-    required OrbitNestHttpClient httpClient,
+    required NestCoreHttpClient httpClient,
     required String baseUrl,
   })  : _httpClient = httpClient,
         _baseUrl = baseUrl,

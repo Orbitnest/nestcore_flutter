@@ -1,3 +1,21 @@
+## [1.9.0]
+
+### Changed — OrbitNest is now NestCore
+- **The package is renamed `orbitnest_studio_flutter` → `nestcore_flutter`** (repository: https://github.com/Orbitnest/nestcore_flutter). Replace the dependency in your `pubspec.yaml`; the main import is now `package:nestcore_flutter/nestcore_flutter.dart`. Releases of `orbitnest_studio_flutter` stop at 1.8.0.
+- Every public `OrbitNest*` type is now `NestCore*`: `NestCoreClient`, `NestCoreAuth`, `NestCoreDatabase`, `NestCoreFunctions`, `NestCoreRealtime`, `NestCoreStorage`, `NestCoreAi`, `NestCoreMemory`, `NestCoreCollections`, `NestCoreException`, `NestCoreConstants`, `NestCoreLogger` (plus the internal `NestCoreHttpClient` / `NestCoreAnalytics`).
+- The default API base URL is `https://api.nestcore.io`.
+- `.env` settings are `NESTCORE_ANON_KEY`, `NESTCORE_DEBUG`, `NESTCORE_API_TIMEOUT` and `NESTCORE_API_URL`.
+- The SDK identifies itself as `X-Client-Info: nestcore-flutter/<version>`; log tags (`NestCore`, `NestCore.HTTP`) and error texts (`NestCoreException(...)`) say NestCore.
+- Realtime offers the `nestcore-realtime-v1` / `nestcore.apikey.<key>` / `nestcore.user-jwt.<jwt>` WebSocket subprotocols (the API accepts both these and the old `orbitnest.*` ones).
+- Secure-storage keys are now `nestcore_session`, `nestcore_access_token`, `nestcore_refresh_token`, `nestcore_api_key` and `nestcore_project_slug`.
+
+### Compatibility — nothing breaks on upgrade
+- **Deprecated aliases:** `OrbitNestClient`, `OrbitNestAuth`, `OrbitNestDatabase`, `OrbitNestFunctions`, `OrbitNestRealtime`, `OrbitNestStorage`, `OrbitNestAi`, `OrbitNestMemory`, `OrbitNestCollections`, `OrbitNestException`, `OrbitNestConstants` and `OrbitNestLogger` are `typedef`s of the new types, so `OrbitNestClient.create(...)`, `on OrbitNestException catch`, `OrbitNestConstants.version` and friends keep compiling (with a deprecation warning).
+- **Old import path:** `package:nestcore_flutter/orbitnest_studio_flutter.dart` re-exports the package (deprecated).
+- **Old env names:** each `ORBITNEST_*` variable is still read when its `NESTCORE_*` counterpart is unset or empty.
+- **Users stay signed in:** on first use the `TokenManager` moves values stored under the old `orbitnest_*` secure-storage keys to the `nestcore_*` keys (only where the new key is empty) and deletes the old keys; sign-out clears both sets.
+- The aliases, the old import path and the `ORBITNEST_*` fallback will be removed in a future major version.
+
 ## [1.8.0]
 
 ### Added — AI data (parity with the Node/Web SDK)
