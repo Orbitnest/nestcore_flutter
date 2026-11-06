@@ -148,6 +148,24 @@ class NestCoreException implements Exception {
     return u is String ? u : null;
   }
 
+  /// 402 `CREDITS_EXHAUSTED`: the workspace's prepaid AI credit cannot pay
+  /// for this call (see [creditsReason]). Offer [buyUrl] or adding your own
+  /// provider key; don't retry.
+  bool get isCreditsExhausted => code == ErrorCodes.creditsExhausted;
+
+  /// `balance` (no credit left) or `spend_cap` (the monthly cap is reached),
+  /// for `CREDITS_EXHAUSTED`.
+  String? get creditsReason {
+    final r = body?['reason'];
+    return isCreditsExhausted && r is String ? r : null;
+  }
+
+  /// 402 `CREDITS_EXHAUSTED`: where to buy more credit, when given.
+  String? get buyUrl {
+    final u = body?['buyUrl'];
+    return u is String ? u : null;
+  }
+
   @override
   String toString() {
     if (code != null) {

@@ -76,4 +76,7 @@ class ErrorCodes {
   static const String projectPaused = 'PROJECT_PAUSED'; // 423, paused or compromised; nothing deleted
   static const String agentProjectRestricted = 'AGENT_PROJECT_RESTRICTED'; // 403, not allowed on an Agent project
   static const String notAnAgentProject = 'NOT_AN_AGENT_PROJECT'; // 409, agent-only operation on an App project
+
+  // AI calls paid from the workspace's prepaid credit (no own provider key).
+  static const String creditsExhausted = 'CREDITS_EXHAUSTED'; // 402, reason balance|spend_cap, buyUrl, balanceUsd/monthlyCapUsd/spentThisMonthUsd
 }
