@@ -364,7 +364,50 @@ class AiDocumentSource {
           'storage': {'bucket': bucket, 'path': path}
         });
 
+  /// Text you chunked and embedded yourself (1–500 chunks, every vector the
+  /// same size): the document is `ready` at once and no provider is called.
+  /// The first client chunks fix the collection's [model]; another model
+  /// answers 409, and text/URL/storage documents then answer 400.
+  factory AiDocumentSource.chunks(List<AiClientChunk> chunks, {required String model, int? dims}) {
+    if (chunks.isEmpty || chunks.length > 500) {
+      throw ArgumentError.value(chunks.length, 'chunks', 'must have 1–500 chunks');
+    }
+    final size = chunks.first.embedding.length;
+    if (chunks.any((c) => c.embedding.length != size)) {
+      throw ArgumentError.value(chunks, 'chunks', 'every embedding must have the same number of dimensions');
+    }
+    final fields = _vectorFields('embedding', chunks.first.embedding, model, dims)..remove('embedding');
+    return AiDocumentSource._({'chunks': chunks.map((c) => c.toJson()).toList(), ...fields});
+  }
+
   Map<String, dynamic> toJson() => Map<String, dynamic>.from(_json);
+}
+
+/// A chunk with your own vector, for [AiDocumentSource.chunks].
+class AiClientChunk {
+  final String content;
+  final List<double> embedding;
+
+  /// E.g. `{'trust': 'user'}` (collection search can filter by `trust`).
+  final Map<String, dynamic>? metadata;
+
+  const AiClientChunk({required this.content, required this.embedding, this.metadata});
+
+  Map<String, dynamic> toJson() => {
+        'content': content,
+        'embedding': embedding,
+        if (metadata != null) 'metadata': metadata,
+      };
+}
+
+/// Body fields of a collection search. Not part of the public API.
+Map<String, dynamic> collectionSearchFields(String? query, Object? trust, List<double>? queryEmbedding, String? model, int? dims) {
+  if (query == null && queryEmbedding == null) throw ArgumentError('Give a query or a queryEmbedding');
+  return {
+    if (query != null) 'query': query,
+    if (trust != null) 'trust': _trustValue(trust),
+    ..._vectorFields('queryEmbedding', queryEmbedding, model, dims),
+  };
 }
 
 class AiDocument {
@@ -372,7 +415,8 @@ class AiDocument {
   final String collectionId;
   final String? ownerUserId;
 
-  /// `text`, `storage` or `url`.
+  /// `text`, `storage` or `url` (client chunks are `text` with source ref
+  /// `client-chunks`).
   final String sourceType;
   final String? sourceRef;
   final String? title;

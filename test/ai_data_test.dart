@@ -416,6 +416,86 @@ void main() {
       expect(r.model, 'mock-embed');
     });
 
+    test('addChunks sends pre-embedded chunks with the model and returns the ready document', () async {
+      handler = (req, body) => json(req, {..._docRow('d2', 'ready'), 'source_ref': 'client-chunks'});
+      final doc = await collections.from('kb').addChunks(
+        const [
+          AiClientChunk(content: 'Refunds go to the card.', embedding: [0.1, 0.2], metadata: {'trust': 'user'}),
+          AiClientChunk(content: 'Within 5 days.', embedding: [0.3, 0.4]),
+        ],
+        model: 'local-768',
+        dims: 2,
+        title: 'Policy',
+        metadata: {'team': 'support'},
+      );
+      expect(doc.isReady, isTrue);
+      expect(doc.sourceRef, 'client-chunks');
+      expect(requests.single.method, 'POST'); // ready at once: no polling
+      expect(requests.single.path, '$_base/collections/kb/documents');
+      expect(requests.single.body, {
+        'chunks': [
+          {'content': 'Refunds go to the card.', 'embedding': [0.1, 0.2], 'metadata': {'trust': 'user'}},
+          {'content': 'Within 5 days.', 'embedding': [0.3, 0.4]},
+        ],
+        'model': 'local-768',
+        'dims': 2,
+        'title': 'Policy',
+        'metadata': {'team': 'support'},
+      });
+
+      // The same body through ingest().
+      await collections.from('kb').ingest(
+        AiDocumentSource.chunks(const [AiClientChunk(content: 'x', embedding: [1, 2, 3])], model: 'local-768'),
+      );
+      expect(requests.last.body, {
+        'chunks': [
+          {'content': 'x', 'embedding': [1, 2, 3]}
+        ],
+        'model': 'local-768',
+      });
+    });
+
+    test('chunk mistakes fail before any request', () async {
+      handler = (req, body) => json(req, _docRow('d1', 'ready'));
+      final kb = collections.from('kb');
+      await expectLater(kb.addChunks(const [], model: 'm'), throwsArgumentError);
+      await expectLater(
+        kb.addChunks(const [AiClientChunk(content: 'a', embedding: [1, 2]), AiClientChunk(content: 'b', embedding: [1])], model: 'm'),
+        throwsArgumentError,
+      );
+      await expectLater(kb.addChunks(const [AiClientChunk(content: 'a', embedding: [1, 2])], model: 'm', dims: 3), throwsArgumentError);
+      await expectLater(kb.addChunks(const [AiClientChunk(content: 'a', embedding: [1, 2])], model: ''), throwsArgumentError);
+      await expectLater(kb.search(null), throwsArgumentError);
+      await expectLater(kb.search(null, queryEmbedding: const [0.1]), throwsArgumentError); // no model
+      expect(requests, isEmpty);
+    });
+
+    test('search by your own vector with a trust filter', () async {
+      handler = (req, body) => json(req, {'results': [], 'model': 'local-768'});
+      final kb = collections.from('kb');
+      final r = await kb.search(null, queryEmbedding: const [0.5, 0.5], model: 'local-768', dims: 2, trust: const ['tool', 'web'], k: 4);
+      await kb.search('refunds', trust: 'user');
+      expect(requests[0].path, '$_base/collections/kb/search');
+      expect(requests[0].body, {
+        'queryEmbedding': [0.5, 0.5],
+        'model': 'local-768',
+        'dims': 2,
+        'trust': ['tool', 'web'],
+        'k': 4,
+      });
+      expect(requests[1].body, {'query': 'refunds', 'trust': 'user'});
+      expect(r.model, 'local-768');
+    });
+
+    test('a collection fixed to another model answers 409 as an AiException', () async {
+      handler = (req, body) => json(req, {'statusCode': 409, 'message': 'Collection "kb" holds a vectors; these chunks are b.'}, 409);
+      await expectLater(
+        collections.from('kb').addChunks(const [AiClientChunk(content: 'x', embedding: [1])], model: 'b'),
+        throwsA(isA<AiException>().having((e) => e.statusCode, 'status', 409)),
+      );
+      expect(requests.length, 1);
+    });
+
     test('listDocuments / getDocument / remove', () async {
       handler = (req, body) {
         if (req.method == 'DELETE') return json(req, {'deleted': false});

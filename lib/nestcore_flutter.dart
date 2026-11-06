@@ -49,7 +49,7 @@ export 'src/storage/exceptions/storage_exception.dart';
 export 'src/ai/nestcore_ai.dart';
 // AI data — memory, collections, threads, traces
 export 'src/ai/ai_data.dart';
-export 'src/ai/ai_data_models.dart' hide memoryUpdateVector;
+export 'src/ai/ai_data_models.dart' hide memoryUpdateVector, collectionSearchFields;
 
 // Types and utilities
 export 'src/types/json_types.dart';

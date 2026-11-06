@@ -251,6 +251,10 @@ class NestCoreMemory {
 /// final kb = client.collections.from('handbook');
 /// await kb.ingest(AiDocumentSource.text(notes), title: 'Notes', wait: true);
 /// final hits = await kb.search('How do refunds work?');
+///
+/// // Your own vectors: ready at once, no provider call.
+/// await kb.addChunks([AiClientChunk(content: text, embedding: vec)], model: 'nomic-embed-text-v1.5');
+/// final near = await kb.search(null, queryEmbedding: q, model: 'nomic-embed-text-v1.5');
 /// ```
 ///
 /// Failures throw [AiException].
@@ -350,6 +354,19 @@ class AiCollectionRef {
     return waitFor(doc.id, timeout: timeout, interval: interval);
   }
 
+  /// Add a document from text you chunked and embedded yourself (see
+  /// [AiDocumentSource.chunks]); it comes back `ready`. Collection search
+  /// then takes `queryEmbedding` with the same [model].
+  Future<AiDocument> addChunks(
+    List<AiClientChunk> chunks, {
+    required String model,
+    int? dims,
+    String? title,
+    Map<String, dynamic>? metadata,
+    String? ownerUserId,
+  }) async =>
+      ingest(AiDocumentSource.chunks(chunks, model: model, dims: dims), title: title, metadata: metadata, ownerUserId: ownerUserId);
+
   /// Poll a document until it is `ready` or `failed`. Throws [AiException]
   /// with code `TIMEOUT` when [timeout] passes first.
   Future<AiDocument> waitFor(
@@ -370,16 +387,32 @@ class AiCollectionRef {
 
   /// Hybrid search (vector + keyword, reciprocal rank fusion); `hybrid: false`
   /// is vector only. [filter] matches documents whose metadata contains it.
-  Future<AiCollectionSearch> search(String query, {int? k, bool? hybrid, Map<String, dynamic>? filter, double? minSimilarity}) => _send(
-        () => _http.post(_path('/search'), options: _billed, data: {
-          'query': query,
-          if (k != null) 'k': k,
-          if (hybrid != null) 'hybrid': hybrid,
-          if (filter != null) 'filter': filter,
-          if (minSimilarity != null) 'minSimilarity': minSimilarity,
-        }),
-        (d) => AiCollectionSearch.fromJson(_asMap(d)),
-      );
+  ///
+  /// Search by text ([query]) or by your own vector ([queryEmbedding] with
+  /// [model], which must be the collection's); [query] may be null when a
+  /// vector is given. [trust] keeps chunks (or documents) whose
+  /// `metadata.trust` is that word, or one of those words (a String or a
+  /// List<String>).
+  Future<AiCollectionSearch> search(
+    String? query, {
+    int? k,
+    bool? hybrid,
+    Map<String, dynamic>? filter,
+    double? minSimilarity,
+    Object? trust,
+    List<double>? queryEmbedding,
+    String? model,
+    int? dims,
+  }) async {
+    final body = {
+      ...collectionSearchFields(query, trust, queryEmbedding, model, dims),
+      if (k != null) 'k': k,
+      if (hybrid != null) 'hybrid': hybrid,
+      if (filter != null) 'filter': filter,
+      if (minSimilarity != null) 'minSimilarity': minSimilarity,
+    };
+    return _send(() => _http.post(_path('/search'), options: _billed, data: body), (d) => AiCollectionSearch.fromJson(_asMap(d)));
+  }
 
   /// [status]: `queued`, `processing`, `ready` or `failed`.
   Future<AiDocumentPage> listDocuments({String? status, int? limit, int? offset}) => _send(
