@@ -138,6 +138,16 @@ class NestCoreException implements Exception {
   /// (e.g. `QUOTA_EXCEEDED`'s `quota`/`plan`/`limit`/`usage`).
   final Map<String, dynamic>? body;
 
+  /// 423: the project is paused (plan limit or owner) or compromised (kill
+  /// switch). Nothing was deleted; calls work again once it is resumed.
+  bool get isProjectPaused => code == ErrorCodes.projectPaused;
+
+  /// 402 `QUOTA_EXCEEDED`: where to send the user to upgrade, when given.
+  String? get upgradeUrl {
+    final u = body?['upgradeUrl'];
+    return u is String ? u : null;
+  }
+
   @override
   String toString() {
     if (code != null) {

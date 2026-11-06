@@ -68,4 +68,12 @@ class ErrorCodes {
   static const String otpRateLimited = 'OTP_RATE_LIMITED'; // too many wrong codes
   static const String otpRequestLimit = 'OTP_REQUEST_LIMIT'; // too many codes requested for one email
   static const String accountLocked = 'ACCOUNT_LOCKED'; // too many wrong passwords
+
+  // Project-level answers any endpoint can give. An App project is a backend
+  // for an app; an Agent project is the private backend of one PC running
+  // NestCore Agent.
+  static const String quotaExceeded = 'QUOTA_EXCEEDED'; // 402, body has quota/plan/limit/usage(/kind/reason/upgradeUrl)
+  static const String projectPaused = 'PROJECT_PAUSED'; // 423, paused or compromised; nothing deleted
+  static const String agentProjectRestricted = 'AGENT_PROJECT_RESTRICTED'; // 403, not allowed on an Agent project
+  static const String notAnAgentProject = 'NOT_AN_AGENT_PROJECT'; // 409, agent-only operation on an App project
 }
