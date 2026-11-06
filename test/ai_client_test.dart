@@ -90,6 +90,53 @@ void main() {
     );
   });
 
+  test('credits() parses the status; a credit-paid call that runs dry throws CREDITS_EXHAUSTED', () async {
+    handler = (req, body) => json(req, {
+          'available': true,
+          'active': true,
+          'balanceUsd': 4.25,
+          'monthlyCapUsd': null,
+          'spentThisMonthUsd': '0.75',
+          'ownKeys': ['openai'],
+          'creditProviders': ['gemini', 'openai'],
+        });
+    final c = await ai.credits();
+    expect(requests.single['path'], '/api/project/demo/ai/v1/credits');
+    expect(c.available, isTrue);
+    expect(c.active, isTrue);
+    expect(c.balanceUsd, 4.25);
+    expect(c.monthlyCapUsd, isNull);
+    expect(c.spentThisMonthUsd, 0.75);
+    expect(c.ownKeys, ['openai']);
+    expect(c.creditProviders, ['gemini', 'openai']);
+
+    handler = (req, body) => json(req, {
+          'statusCode': 402,
+          'code': 'CREDITS_EXHAUSTED',
+          'reason': 'balance',
+          'message': 'This workspace has no AI credit left.',
+          'balanceUsd': 0,
+          'monthlyCapUsd': 10,
+          'spentThisMonthUsd': 10,
+          'buyUrl': 'https://nestcore.io/settings/billing?ref=credits',
+        }, 402);
+    await expectLater(
+      ai.chat(messages: const [AiMessage.user('hi')]),
+      throwsA(isA<AiException>()
+          .having((e) => e.isCreditsExhausted, 'isCreditsExhausted', isTrue)
+          .having((e) => e.creditsReason, 'reason', 'balance')
+          .having((e) => e.buyUrl, 'buyUrl', 'https://nestcore.io/settings/billing?ref=credits')
+          .having((e) => e.statusCode, 'status', 402)),
+    );
+    expect(requests.length, 2); // not retried
+  });
+
+  test('openAiBaseUrl points at the OpenAI-compatible routes', () {
+    final http = NestCoreHttpClient(baseUrl: 'https://api.nestcore.io/', tokenManager: TokenManager(projectSlug: 'demo', apiKey: 'anon'));
+    expect(NestCoreAi(httpClient: http, projectSlug: 'demo').openAiBaseUrl, 'https://api.nestcore.io/api/project/demo/ai/openai/v1');
+    expect(ai.openAiBaseUrl, 'http://127.0.0.1:${server.port}/api/project/demo/ai/openai/v1');
+  });
+
   test('a provider 500 is not retried (a resend would pay twice)', () async {
     handler = (req, body) => json(req, {'code': 'AI_PROVIDER_ERROR', 'message': 'boom'}, 502);
     await expectLater(ai.chat(messages: const [AiMessage.user('hi')]), throwsA(isA<AiException>()));

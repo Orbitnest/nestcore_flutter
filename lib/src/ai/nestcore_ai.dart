@@ -10,8 +10,9 @@ import 'sse.dart';
 /// Thrown by [NestCoreAi.chat], [NestCoreAi.embed] and [NestCoreAi.models].
 ///
 /// [code] is the gateway code, e.g. `AI_PROVIDER_NOT_CONFIGURED`,
-/// `AI_BUDGET_EXCEEDED` (402, [body] holds `scope`, `limitUsd`, `usedUsd`) or
-/// `AI_RATE_LIMITED` (429, [body] holds `retryAfterSec`).
+/// `AI_BUDGET_EXCEEDED` (402, [body] holds `scope`, `limitUsd`, `usedUsd`),
+/// `CREDITS_EXHAUSTED` (402, see [isCreditsExhausted], [creditsReason] and
+/// [buyUrl]) or `AI_RATE_LIMITED` (429, [body] holds `retryAfterSec`).
 class AiException extends NestCoreException {
   const AiException(super.message, {super.code, super.statusCode, super.body});
 
@@ -224,6 +225,51 @@ class AiEmbedResult {
   const AiEmbedResult({required this.model, required this.provider, required this.dimensions, required this.embeddings});
 }
 
+/// Whether the project's AI calls can be paid from its workspace's prepaid
+/// credit ([NestCoreAi.credits]). A project's own provider key always wins;
+/// without one, credit pays for the call at the platform's key.
+class AiCredits {
+  /// There is credit to spend now.
+  final bool available;
+
+  /// The workspace has bought credit at some point.
+  final bool active;
+  final double balanceUsd;
+
+  /// Null when no monthly cap is set.
+  final double? monthlyCapUsd;
+  final double spentThisMonthUsd;
+
+  /// Providers the project has its own key for (these never use credit).
+  final List<String> ownKeys;
+
+  /// Providers credit can pay for (empty until the workspace buys credit).
+  final List<String> creditProviders;
+
+  const AiCredits({
+    required this.available,
+    required this.active,
+    required this.balanceUsd,
+    this.monthlyCapUsd,
+    required this.spentThisMonthUsd,
+    this.ownKeys = const [],
+    this.creditProviders = const [],
+  });
+
+  static double? _num(Object? v) => v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
+  static List<String> _strings(Object? v) => v is List ? v.map((e) => '$e').toList() : const [];
+
+  factory AiCredits.fromJson(Map<String, dynamic> j) => AiCredits(
+        available: j['available'] == true,
+        active: j['active'] == true,
+        balanceUsd: _num(j['balanceUsd']) ?? 0,
+        monthlyCapUsd: _num(j['monthlyCapUsd']),
+        spentThisMonthUsd: _num(j['spentThisMonthUsd']) ?? 0,
+        ownKeys: _strings(j['ownKeys']),
+        creditProviders: _strings(j['creditProviders']),
+      );
+}
+
 /// AI Gateway: chat, streaming and embeddings through the project's own
 /// provider keys (NestCore → Project Settings → AI). Calls need a signed-in user
 /// or a service-role key.
@@ -248,6 +294,18 @@ class NestCoreAi {
   final AiThreads threads;
 
   String _path(String p) => '/api/project/$_projectSlug/ai/v1/$p';
+
+  /// Base URL of the OpenAI-compatible API (`chat/completions` with `stream`,
+  /// `embeddings`, `models`), for OpenAI client libraries:
+  /// `<apiUrl>/api/project/<slug>/ai/openai/v1`. Send the anon key as the
+  /// `apikey` header and the user's (or device's) access token as the bearer.
+  String get openAiBaseUrl {
+    var base = _httpClient.baseUrl;
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+    return '$base/api/project/${Uri.encodeComponent(_projectSlug)}/ai/openai/v1';
+  }
 
   // Model replies outlast the default timeout, and a resend would pay twice.
   static final _options = Options(receiveTimeout: const Duration(seconds: 130), extra: {'noRetry': true});
@@ -344,6 +402,18 @@ class NestCoreAi {
     try {
       final res = await _httpClient.get(_path('models'));
       return (res.data as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
+    } catch (e) {
+      throw await AiException.fromError(e);
+    }
+  }
+
+  /// Whether calls without the project's own provider key can be paid from
+  /// the workspace's prepaid credit, and how much is left. When credit runs
+  /// out, AI calls throw [AiException] with [NestCoreException.isCreditsExhausted].
+  Future<AiCredits> credits() async {
+    try {
+      final res = await _httpClient.get(_path('credits'));
+      return AiCredits.fromJson(Map<String, dynamic>.from(res.data as Map));
     } catch (e) {
       throw await AiException.fromError(e);
     }
