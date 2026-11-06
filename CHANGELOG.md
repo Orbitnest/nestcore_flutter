@@ -1,3 +1,20 @@
+## [1.10.0]
+
+### Added — your own embeddings (NestCore Agent "Sync to NestCore")
+- **Client vectors, no provider call, nothing charged.** `memory.add(content, embedding:, model:, dims:)`, `memory.update(id, content:, embedding:, model:)` (a vector only together with new content) and `memory.search(query, queryEmbedding:, model:, dims:)`; `query` may now be `null` when a vector is given. `dims` is checked against the vector length; a vector without `model`, an empty vector or a wrong `dims` throws `ArgumentError` before any request. Search compares only vectors of the same model and size.
+- **Trust filter:** `memory.search(..., trust: 'user')` or `trust: ['tool', 'web']` keeps memories whose reserved `metadata.trust` word matches; collection `search` takes the same `trust` (chunks or their document).
+- **Batch memory:** `memory.addMany(List<AiMemoryInput>)` (≤ 100, → `List<AiMemoryAddResult>`), `memory.searchMany(List<AiMemoryQuery>)` (≤ 20, → `List<AiMemorySearchResult>`) and `memory.forgetMany(ids:, subjects:)` (→ deleted count). Each added or searched item counts against the plan's memory quota; an invalid item fails the whole call with `400 "item <i>: …"`. `AiMemoryInput` / `AiMemoryQuery` are the item types (and what `add` / `search` send).
+- **Collection documents from pre-embedded chunks:** `collections.from(name).addChunks([AiClientChunk(content:, embedding:, metadata:)], model:, dims:, title:, metadata:)`, or `ingest(AiDocumentSource.chunks(...))`. The document is `ready` at once (source ref `client-chunks`). The first client chunks fix the collection's model: another model answers `409`, and text/URL/storage documents then answer `400`.
+- **Collection search by vector:** `search(null, queryEmbedding:, model:, dims:)` (the model must be the collection's).
+
+### Added — cloud credits
+- `ai.credits()` → `AiCredits` (`available`, `active`, `balanceUsd`, `monthlyCapUsd`, `spentThisMonthUsd`, `ownKeys`, `creditProviders`): whether calls without the project's own provider key can be paid from the workspace's prepaid credit.
+- Error code `ErrorCodes.creditsExhausted` (`CREDITS_EXHAUSTED`, 402) and `NestCoreException.isCreditsExhausted`, `creditsReason` (`balance` | `spend_cap`) and `buyUrl` (also on `AiException` and the deprecated `OrbitNestException` alias). Show the message with two actions, open `buyUrl` or add your own key; don't retry.
+- `ai.openAiBaseUrl`: `<apiUrl>/api/project/<slug>/ai/openai/v1`, for OpenAI client libraries (anon key as the `apikey` header, the access token as the bearer).
+
+### Added — project errors (since 1.9.0)
+- `ErrorCodes.quotaExceeded`, `projectPaused`, `agentProjectRestricted`, `notAnAgentProject`, and `NestCoreException.isProjectPaused` / `upgradeUrl`.
+
 ## [1.9.0]
 
 ### Changed — OrbitNest is now NestCore

@@ -2,7 +2,7 @@
 class NestCoreConstants {
   // Package info
   static const String packageName = 'nestcore_flutter';
-  static const String version = '1.9.0'; // keep in sync with pubspec.yaml
+  static const String version = '1.10.0'; // keep in sync with pubspec.yaml
 
   // Storage keys
   static const String accessTokenKey = 'nestcore_access_token';

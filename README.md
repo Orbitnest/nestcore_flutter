@@ -25,7 +25,7 @@ The client is built on the BLoC pattern internally, but you don't need to know B
 
 ```yaml
 dependencies:
-  nestcore_flutter: ^1.9.0
+  nestcore_flutter: ^1.10.0
 ```
 
 ```bash
@@ -413,6 +413,10 @@ await for (final ev in nestcore.ai.chatStream(messages: history)) {
 final e = await nestcore.ai.embed(['first', 'second']); // 768 dimensions
 ```
 
+**Cloud credits.** Without the project's own provider key, a workspace that bought credit pays for calls at NestCore's key. `await nestcore.ai.credits()` tells you whether credit is `available`, the `balanceUsd`, `monthlyCapUsd` and `spentThisMonthUsd`, and which providers use your `ownKeys`. When credit runs out, AI calls throw an `AiException` with `isCreditsExhausted` (`creditsReason` is `balance` or `spend_cap`): offer `e.buyUrl` or adding your own key, and don't retry.
+
+For OpenAI client libraries, `nestcore.ai.openAiBaseUrl` is the OpenAI-compatible base URL (`chat/completions`, `embeddings`, `models`); send the anon key as the `apikey` header and the access token as the bearer.
+
 Tool calls: answer each `r.toolCalls` entry with `AiMessage.toolResult(call, result)` after appending `AiMessage.fromResult(r)` to the history, then chat again. Cancelling the stream subscription stops the reply at the server. Errors from `chat`/`embed` are `AiException` (`code`, `statusCode`, `body`).
 
 ### Memory, collections and threads
@@ -440,6 +444,23 @@ await for (final ev in nestcore.ai.threads.from(t.id).run(
   }
 }
 final history = await nestcore.ai.threads.from(t.id).messages();
+```
+
+**Your own embeddings.** With a local embedding model, send the vector and its model: the server calls no provider and charges nothing. Search compares only vectors of the same model and size.
+
+```dart
+const model = 'nomic-embed-text-v1.5';
+await nestcore.memory.add('Prefers tea', embedding: vec, model: model, metadata: {'trust': 'user'});
+final near = await nestcore.memory.search(null, queryEmbedding: q, model: model, trust: ['user', 'tool']);
+
+// Batches: up to 100 adds, 20 searches, or 500 ids / 20 subjects to forget.
+await nestcore.memory.addMany([AiMemoryInput('Likes tea', embedding: v1, model: model), AiMemoryInput('Hates rain', embedding: v2, model: model)]);
+final many = await nestcore.memory.searchMany([AiMemoryQuery(queryEmbedding: q1, model: model), AiMemoryQuery(query: 'weather')]);
+await nestcore.memory.forgetMany(ids: staleIds);
+
+// Pre-chunked documents are ready at once; the first chunks fix the collection's model.
+await kb.addChunks([AiClientChunk(content: text, embedding: v, metadata: {'trust': 'web'})], model: model);
+final found = await kb.search(null, queryEmbedding: q, model: model);
 ```
 
 Creating collections, adding shared documents, `memory.subjects()`/`reembed()` and `ai.traces()` need the service-role key, which an app never holds (use the NestCore console, the Node SDK or the CLI). `runOnce()` waits for the finished message instead of streaming. Failures throw `AiException`; `run()` yields a `ThreadRunError` instead.
