@@ -12,6 +12,31 @@ List<Map<String, dynamic>> _maps(Object? v) =>
     v is List ? v.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList() : const [];
 String? _str(Object? v) => v?.toString();
 
+/// A vector the client computed with its own model, plus the `model` (and
+/// optional `dims`) the server needs to store or compare it. The server then
+/// calls no provider and charges nothing.
+Map<String, dynamic> _vectorFields(String key, List<double>? vector, String? model, int? dims) {
+  if (vector == null) {
+    if (dims != null) throw ArgumentError.value(dims, 'dims', 'is only sent with $key');
+    return {if (model != null) 'model': model};
+  }
+  if (vector.isEmpty || vector.length > 2000) {
+    throw ArgumentError.value(vector.length, key, 'must have 1–2000 numbers');
+  }
+  if (model == null || model.isEmpty) throw ArgumentError.value(model, 'model', 'is required with $key');
+  if (dims != null && dims != vector.length) {
+    throw ArgumentError.value(dims, 'dims', 'must equal the length of $key (${vector.length})');
+  }
+  return {key: vector, 'model': model, if (dims != null) 'dims': dims};
+}
+
+/// `trust` filter: one lowercase word or a list of them.
+Object? _trustValue(Object? trust) {
+  if (trust == null || trust is String) return trust;
+  if (trust is Iterable) return trust.map((t) => t is String ? t : throw ArgumentError.value(trust, 'trust', 'must be strings')).toList();
+  throw ArgumentError.value(trust, 'trust', 'must be a String or a List<String>');
+}
+
 // ── Memory ────────────────────────────────────────────────────────────────
 
 /// One remembered fact about a subject (`user:<id>`, `agent:support`, …).
@@ -84,6 +109,118 @@ class AiMemoryMatch {
 
   factory AiMemoryMatch.fromJson(Map<String, dynamic> j) =>
       AiMemoryMatch(memory: AiMemory.fromJson(j), similarity: _dbl(j['similarity']), score: _dbl(j['score']) ?? 0);
+}
+
+/// One memory to add: the body of `memory.add()`, and an item of
+/// `memory.addMany()`.
+///
+/// With [embedding] (your own vector, 1–2000 numbers) and [model] (the
+/// embedding model that made it) the server calls no provider. Search only
+/// compares vectors of the same model and size.
+class AiMemoryInput {
+  final String content;
+  final String? subject;
+  final String? kind;
+
+  /// 1–5 (default 3).
+  final int? importance;
+  final DateTime? expiresAt;
+
+  /// `metadata.trust` is reserved: a lowercase word such as `user`, `tool`
+  /// or `web` that search can filter by.
+  final Map<String, dynamic>? metadata;
+  final String? sourceThreadId;
+  final bool? dedupe;
+  final List<double>? embedding;
+  final String? model;
+
+  /// Checked against the length of [embedding].
+  final int? dims;
+
+  const AiMemoryInput(
+    this.content, {
+    this.subject,
+    this.kind,
+    this.importance,
+    this.expiresAt,
+    this.metadata,
+    this.sourceThreadId,
+    this.dedupe,
+    this.embedding,
+    this.model,
+    this.dims,
+  });
+
+  /// Throws [ArgumentError] when [embedding] comes without [model], or
+  /// [dims] does not match it.
+  Map<String, dynamic> toJson() => {
+        'content': content,
+        if (subject != null) 'subject': subject,
+        if (kind != null) 'kind': kind,
+        if (importance != null) 'importance': importance,
+        if (expiresAt != null) 'expiresAt': expiresAt!.toUtc().toIso8601String(),
+        if (metadata != null) 'metadata': metadata,
+        if (sourceThreadId != null) 'sourceThreadId': sourceThreadId,
+        if (dedupe != null) 'dedupe': dedupe,
+        ..._vectorFields('embedding', embedding, model, dims),
+      };
+}
+
+/// One memory search: the body of `memory.search()`, and an item of
+/// `memory.searchMany()`. Give [query], or [queryEmbedding] with its [model].
+class AiMemoryQuery {
+  final String? query;
+  final String? subject;
+
+  /// Up to 50 (default 5).
+  final int? k;
+  final String? kind;
+  final double? minSimilarity;
+
+  /// Only memories whose `metadata.trust` is this word, or one of these
+  /// words: a String or a List<String>.
+  final Object? trust;
+  final List<double>? queryEmbedding;
+  final String? model;
+  final int? dims;
+
+  const AiMemoryQuery({
+    this.query,
+    this.subject,
+    this.k,
+    this.kind,
+    this.minSimilarity,
+    this.trust,
+    this.queryEmbedding,
+    this.model,
+    this.dims,
+  });
+
+  /// Throws [ArgumentError] when neither [query] nor [queryEmbedding] is
+  /// given, or the vector fields don't fit together.
+  Map<String, dynamic> toJson() {
+    if (query == null && queryEmbedding == null) {
+      throw ArgumentError('Give a query or a queryEmbedding');
+    }
+    return {
+      if (query != null) 'query': query,
+      if (subject != null) 'subject': subject,
+      if (k != null) 'k': k,
+      if (kind != null) 'kind': kind,
+      if (minSimilarity != null) 'minSimilarity': minSimilarity,
+      if (trust != null) 'trust': _trustValue(trust),
+      ..._vectorFields('queryEmbedding', queryEmbedding, model, dims),
+    };
+  }
+}
+
+/// Fields for `memory.update()`'s new vector (only together with new
+/// content). Not part of the public API.
+Map<String, dynamic> memoryUpdateVector(String? content, List<double>? embedding, String? model, int? dims) {
+  if (embedding != null && content == null) {
+    throw ArgumentError.value(embedding, 'embedding', 'is only sent together with new content');
+  }
+  return _vectorFields('embedding', embedding, model, dims);
 }
 
 class AiMemoryAddResult {

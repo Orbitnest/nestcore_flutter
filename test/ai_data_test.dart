@@ -191,6 +191,110 @@ void main() {
       expect(requests[6].body, {'limit': 64});
     });
 
+    test('client embeddings: add/search/update send the vector with its model; trust filters', () async {
+      handler = (req, body) {
+        if (req.uri.path.endsWith('/search')) return json(req, {'results': [], 'degraded': false, 'model': 'local-768'});
+        if (req.method == 'PATCH') return json(req, _memoryRow('m1', content: 'Likes green tea'));
+        return json(req, {'memory': _memoryRow('m1'), 'deduped': false});
+      };
+      await memory.add('Likes tea', embedding: const [0.1, 0.2, 0.3], model: 'local-768', dims: 3, metadata: {'trust': 'user'});
+      final r = await memory.search(null, queryEmbedding: const [0.3, 0.2, 0.1], model: 'local-768', trust: const ['tool', 'web'], k: 2);
+      await memory.search('tea?', trust: 'user');
+      await memory.update('m1', content: 'Likes green tea', embedding: const [1, 0, 0], model: 'local-768');
+
+      expect(requests[0].body, {
+        'content': 'Likes tea',
+        'metadata': {'trust': 'user'},
+        'embedding': [0.1, 0.2, 0.3],
+        'model': 'local-768',
+        'dims': 3,
+      });
+      expect(requests[1].body, {
+        'k': 2,
+        'trust': ['tool', 'web'],
+        'queryEmbedding': [0.3, 0.2, 0.1],
+        'model': 'local-768',
+      });
+      expect(requests[2].body, {'query': 'tea?', 'trust': 'user'});
+      expect(requests[3].method, 'PATCH');
+      expect(requests[3].body, {'content': 'Likes green tea', 'embedding': [1, 0, 0], 'model': 'local-768'});
+      expect(r.model, 'local-768');
+    });
+
+    test('client embedding mistakes fail before any request', () async {
+      handler = (req, body) => json(req, {});
+      await expectLater(memory.add('x', embedding: const [0.1]), throwsArgumentError); // no model
+      await expectLater(memory.add('x', embedding: const [0.1, 0.2], model: 'm', dims: 3), throwsArgumentError);
+      await expectLater(memory.add('x', embedding: const [], model: 'm'), throwsArgumentError);
+      await expectLater(memory.search(null), throwsArgumentError); // no query and no vector
+      await expectLater(memory.search('q', trust: 3), throwsArgumentError);
+      await expectLater(memory.update('m1', embedding: const [0.1], model: 'm'), throwsArgumentError); // vector without content
+      expect(requests, isEmpty);
+    });
+
+    test('addMany / searchMany / forgetMany use the batch routes and keep order', () async {
+      handler = (req, body) {
+        final p = req.uri.path;
+        if (p.endsWith('/batch/add')) {
+          return json(req, {
+            'results': [
+              {'memory': _memoryRow('m1'), 'deduped': false},
+              {'memory': _memoryRow('m2', content: 'Hates rain'), 'deduped': true},
+            ]
+          });
+        }
+        if (p.endsWith('/batch/search')) {
+          return json(req, {
+            'results': [
+              {'results': [{..._memoryRow('m1'), 'similarity': 0.9, 'score': 0.95}], 'degraded': false, 'model': 'local-768'},
+              {'results': [], 'degraded': true, 'model': null},
+            ]
+          });
+        }
+        return json(req, {'deleted': 7});
+      };
+
+      final added = await memory.addMany(const [
+        AiMemoryInput('Likes tea', embedding: [0.1, 0.2], model: 'local-768', metadata: {'trust': 'user'}),
+        AiMemoryInput('Hates rain', kind: 'preference', subject: 'owner:o1'),
+      ]);
+      expect(added.map((r) => r.memory.id), ['m1', 'm2']);
+      expect(added.last.deduped, isTrue);
+
+      final found = await memory.searchMany(const [
+        AiMemoryQuery(queryEmbedding: [0.2, 0.1], model: 'local-768', trust: 'user'),
+        AiMemoryQuery(query: 'weather', k: 3),
+      ]);
+      expect(found.first.results.single.memory.id, 'm1');
+      expect(found.last.degraded, isTrue);
+
+      expect(await memory.forgetMany(ids: const ['m1', 'm2'], subjects: const ['owner:o1']), 7);
+
+      expect(requests.map((r) => r.path.replaceFirst(_base, '')), ['/memory/batch/add', '/memory/batch/search', '/memory/batch/forget']);
+      expect(requests[0].body, {
+        'items': [
+          {'content': 'Likes tea', 'metadata': {'trust': 'user'}, 'embedding': [0.1, 0.2], 'model': 'local-768'},
+          {'content': 'Hates rain', 'subject': 'owner:o1', 'kind': 'preference'},
+        ]
+      });
+      expect(requests[1].body, {
+        'queries': [
+          {'trust': 'user', 'queryEmbedding': [0.2, 0.1], 'model': 'local-768'},
+          {'query': 'weather', 'k': 3},
+        ]
+      });
+      expect(requests[2].body, {'ids': ['m1', 'm2'], 'subjects': ['owner:o1']});
+    });
+
+    test('a bad batch item comes back as a 400 AiException', () async {
+      handler = (req, body) => json(req, {'statusCode': 400, 'message': 'item 1: dims must equal the embedding length'}, 400);
+      await expectLater(
+        memory.addMany(const [AiMemoryInput('a'), AiMemoryInput('b')]),
+        throwsA(isA<AiException>().having((e) => e.statusCode, 'status', 400).having((e) => e.message, 'message', startsWith('item 1:'))),
+      );
+      expect(requests.length, 1);
+    });
+
     test('errors are typed AiExceptions and writes are not retried', () async {
       handler = (req, body) => json(req, {'code': 'AI_PROVIDER_ERROR', 'message': 'down', 'statusCode': 502}, 502);
       await expectLater(

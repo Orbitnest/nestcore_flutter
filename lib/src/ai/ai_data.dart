@@ -59,6 +59,10 @@ Object _content(Object content) {
 /// ```dart
 /// await client.memory.add('Prefers vegetarian recipes', kind: 'preference');
 /// final hits = await client.memory.search('what should I cook?');
+///
+/// // With a local embedding model: no provider call, nothing charged.
+/// await client.memory.add('Prefers tea', embedding: vec, model: 'nomic-embed-text-v1.5');
+/// final near = await client.memory.search(null, queryEmbedding: q, model: 'nomic-embed-text-v1.5');
 /// ```
 ///
 /// Failures throw [AiException].
@@ -76,6 +80,11 @@ class NestCoreMemory {
   /// memory (cosine ≥ 0.92) was updated instead; pass `dedupe: false` to
   /// always add. [importance] is 1–5 (default 3); after [expiresAt] the memory
   /// is deleted.
+  ///
+  /// Pass [embedding] (your own vector, 1–2000 numbers) with the [model] that
+  /// made it, and the server calls no provider and charges nothing. [dims] is
+  /// checked against the vector length. `metadata['trust']` is reserved for a
+  /// lowercase word (`user`, `tool`, `web`…) that [search] can filter by.
   Future<AiMemoryAddResult> add(
     String content, {
     String? subject,
@@ -85,32 +94,89 @@ class NestCoreMemory {
     Map<String, dynamic>? metadata,
     String? sourceThreadId,
     bool? dedupe,
-  }) =>
-      _send(
-        () => _http.post(_path(), options: _billed, data: {
-          'content': content,
-          if (subject != null) 'subject': subject,
-          if (kind != null) 'kind': kind,
-          if (importance != null) 'importance': importance,
-          if (expiresAt != null) 'expiresAt': expiresAt.toUtc().toIso8601String(),
-          if (metadata != null) 'metadata': metadata,
-          if (sourceThreadId != null) 'sourceThreadId': sourceThreadId,
-          if (dedupe != null) 'dedupe': dedupe,
-        }),
-        (d) => AiMemoryAddResult.fromJson(_asMap(d)),
-      );
+    List<double>? embedding,
+    String? model,
+    int? dims,
+  }) async {
+    final body = AiMemoryInput(
+      content,
+      subject: subject,
+      kind: kind,
+      importance: importance,
+      expiresAt: expiresAt,
+      metadata: metadata,
+      sourceThreadId: sourceThreadId,
+      dedupe: dedupe,
+      embedding: embedding,
+      model: model,
+      dims: dims,
+    ).toJson();
+    return _send(() => _http.post(_path(), options: _billed, data: body), (d) => AiMemoryAddResult.fromJson(_asMap(d)));
+  }
 
   /// The most relevant memories ([k] up to 50, default 5). `degraded: true`
   /// means the model provider was down and keyword search answered.
-  Future<AiMemorySearchResult> search(String query, {String? subject, int? k, String? kind, double? minSimilarity}) => _send(
-        () => _http.post(_path('/search'), options: _billed, data: {
-          'query': query,
-          if (subject != null) 'subject': subject,
-          if (k != null) 'k': k,
-          if (kind != null) 'kind': kind,
-          if (minSimilarity != null) 'minSimilarity': minSimilarity,
+  ///
+  /// Search by text ([query]) or by your own vector ([queryEmbedding] with its
+  /// [model]); [query] may be null when a vector is given. Only memories made
+  /// with the same model and size are compared. [trust] keeps memories whose
+  /// `metadata.trust` is that word, or one of those words (a String or a
+  /// List<String>).
+  Future<AiMemorySearchResult> search(
+    String? query, {
+    String? subject,
+    int? k,
+    String? kind,
+    double? minSimilarity,
+    Object? trust,
+    List<double>? queryEmbedding,
+    String? model,
+    int? dims,
+  }) async {
+    final body = AiMemoryQuery(
+      query: query,
+      subject: subject,
+      k: k,
+      kind: kind,
+      minSimilarity: minSimilarity,
+      trust: trust,
+      queryEmbedding: queryEmbedding,
+      model: model,
+      dims: dims,
+    ).toJson();
+    return _send(() => _http.post(_path('/search'), options: _billed, data: body), (d) => AiMemorySearchResult.fromJson(_asMap(d)));
+  }
+
+  /// Remember up to 100 facts in one call (each counts as one memory op
+  /// against the plan). Results are in the order of [items]. An invalid item
+  /// fails the whole call with a 400 naming it (`item <i>: …`).
+  Future<List<AiMemoryAddResult>> addMany(List<AiMemoryInput> items) async {
+    final body = {'items': items.map((i) => i.toJson()).toList()};
+    return _send(
+      () => _http.post(_path('/batch/add'), options: _billed, data: body),
+      (d) => (_asMap(d)['results'] as List).map((r) => AiMemoryAddResult.fromJson(_asMap(r))).toList(),
+    );
+  }
+
+  /// Up to 20 searches in one call (each counts as one memory op). Results
+  /// are in the order of [queries].
+  Future<List<AiMemorySearchResult>> searchMany(List<AiMemoryQuery> queries) async {
+    final body = {'queries': queries.map((q) => q.toJson()).toList()};
+    return _send(
+      () => _http.post(_path('/batch/search'), options: _billed, data: body),
+      (d) => (_asMap(d)['results'] as List).map((r) => AiMemorySearchResult.fromJson(_asMap(r))).toList(),
+    );
+  }
+
+  /// Delete memories by id (up to 500) and/or whole subjects (up to 20; users
+  /// and agents only their own). Returns how many were deleted; never
+  /// counted against the plan.
+  Future<int> forgetMany({List<String>? ids, List<String>? subjects}) => _send(
+        () => _http.post(_path('/batch/forget'), options: _write, data: {
+          if (ids != null) 'ids': ids,
+          if (subjects != null) 'subjects': subjects,
         }),
-        (d) => AiMemorySearchResult.fromJson(_asMap(d)),
+        (d) => (_asMap(d)['deleted'] as num?)?.toInt() ?? 0,
       );
 
   /// A subject's memories, newest first.
@@ -121,7 +187,8 @@ class NestCoreMemory {
 
   Future<AiMemory> get(String id) => _send(() => _http.get(_path('/${_seg(id)}')), (d) => AiMemory.fromJson(_asMap(d)));
 
-  /// Change a memory. [clearExpiresAt] removes its expiry.
+  /// Change a memory. [clearExpiresAt] removes its expiry. New [content] may
+  /// come with your own [embedding] and its [model] (never a vector alone).
   Future<AiMemory> update(
     String id, {
     String? content,
@@ -130,17 +197,20 @@ class NestCoreMemory {
     DateTime? expiresAt,
     bool clearExpiresAt = false,
     Map<String, dynamic>? metadata,
-  }) =>
-      _send(
-        () => _http.patch(_path('/${_seg(id)}'), options: _billed, data: {
-          if (content != null) 'content': content,
-          if (kind != null) 'kind': kind,
-          if (importance != null) 'importance': importance,
-          if (clearExpiresAt) 'expiresAt': null else if (expiresAt != null) 'expiresAt': expiresAt.toUtc().toIso8601String(),
-          if (metadata != null) 'metadata': metadata,
-        }),
-        (d) => AiMemory.fromJson(_asMap(d)),
-      );
+    List<double>? embedding,
+    String? model,
+    int? dims,
+  }) async {
+    final body = {
+      if (content != null) 'content': content,
+      if (kind != null) 'kind': kind,
+      if (importance != null) 'importance': importance,
+      if (clearExpiresAt) 'expiresAt': null else if (expiresAt != null) 'expiresAt': expiresAt.toUtc().toIso8601String(),
+      if (metadata != null) 'metadata': metadata,
+      ...memoryUpdateVector(content, embedding, model, dims),
+    };
+    return _send(() => _http.patch(_path('/${_seg(id)}'), options: _billed, data: body), (d) => AiMemory.fromJson(_asMap(d)));
+  }
 
   /// Delete one memory. False when it did not exist (or is not yours).
   Future<bool> remove(String id) =>
