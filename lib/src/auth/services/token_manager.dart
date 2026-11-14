@@ -33,6 +33,67 @@ class TokenManager {
     : _projectSlug = projectSlug,
       _apiKey = apiKey;
 
+  // ── Per-project session keys (1.11.0) ──────────────────────────────────────
+  //
+  // A project's Production and Development branches are different projects
+  // (`my_app` and `my_app__dev`) with different signing keys. With one shared
+  // set of keys, a dev build and a prod build of the same app on one device
+  // overwrote each other's session. When the project slug is known the four
+  // session keys are scoped to it: `nestcore_session@my_app__dev`. The API key
+  // and project slug entries stay shared (they are configuration).
+
+  static const List<String> _sessionBaseKeys = [
+    NestCoreConstants.sessionKey,
+    '${NestCoreConstants.sessionKey}_checksum',
+    NestCoreConstants.accessTokenKey,
+    NestCoreConstants.refreshTokenKey,
+  ];
+
+  bool get _scoped => (_projectSlug ?? '').isNotEmpty;
+
+  /// Storage key for session entry [base] (scoped to the project when known).
+  String _k(String base) => _scoped ? '$base@$_projectSlug' : base;
+
+  /// Whether a session stored under the shared (unscoped) keys was issued for
+  /// this project: project tokens carry `aud: <slug>` and
+  /// `iss: <brand>:project:<slug>`. Tokens without those claims (older
+  /// servers) are treated as this project's, so nobody is signed out.
+  bool _isThisProjectsSession(String sessionJson) {
+    try {
+      final map = json.decode(sessionJson) as Map<String, dynamic>;
+      final token = (map['access_token'] ?? map['refresh_token']) as String?;
+      if (token == null || token.isEmpty) return true;
+      final claims = JwtDecoder.decode(token);
+      final aud = claims['aud'];
+      if (aud is String && aud.isNotEmpty) return aud == _projectSlug;
+      if (aud is List && aud.isNotEmpty) return aud.contains(_projectSlug);
+      final iss = claims['iss'];
+      if (iss is String && iss.contains(':project:')) return iss.endsWith(':project:$_projectSlug');
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// One-time move of a session stored under the shared keys (SDK < 1.11.0)
+  /// to this project's scoped keys, only when it belongs to this project. A
+  /// session of another project or branch is left where it is.
+  Future<void> _migrateToProjectKeys() async {
+    if (!_scoped) return;
+    try {
+      if (await _secureStorage.read(key: _k(NestCoreConstants.sessionKey)) != null) return;
+      final shared = await _secureStorage.read(key: NestCoreConstants.sessionKey);
+      if (shared == null || !_isThisProjectsSession(shared)) return;
+      for (final base in _sessionBaseKeys) {
+        final value = await _secureStorage.read(key: base);
+        if (value != null) await _secureStorage.write(key: _k(base), value: value);
+        await _secureStorage.delete(key: base);
+      }
+    } catch (e) {
+      NestCoreLogger.error('Failed to move the session to project-scoped keys', e);
+    }
+  }
+
   // ── Session-expiry signal ──────────────────────────────────────────────────
   //
   // Broadcasts when the server has rejected our session AFTER a token refresh
@@ -70,8 +131,13 @@ class TokenManager {
   /// Read [key] from secure storage, after moving any pre-1.9.0
   /// `orbitnest_*` keys over (see [_migrateLegacyKeys]).
   Future<String?> _read(String key) async {
-    await (_legacyMigration ??= _migrateLegacyKeys());
+    await (_legacyMigration ??= _migrateAll());
     return _secureStorage.read(key: key);
+  }
+
+  Future<void> _migrateAll() async {
+    await _migrateLegacyKeys();
+    await _migrateToProjectKeys();
   }
 
   Future<void>? _legacyMigration;
@@ -113,7 +179,7 @@ class TokenManager {
     // a partial update can never destroy session persistence.
     if (session.refreshToken.isEmpty) {
       final existing = _cachedRefreshToken ??
-          await _read(NestCoreConstants.refreshTokenKey);
+          await _read(_k(NestCoreConstants.refreshTokenKey));
       if (existing != null && existing.isNotEmpty) {
         NestCoreLogger.error(
           'storeSession: incoming session has empty refresh token — '
@@ -141,19 +207,19 @@ class TokenManager {
 
       await Future.wait([
         _secureStorage.write(
-          key: NestCoreConstants.sessionKey,
+          key: _k(NestCoreConstants.sessionKey),
           value: sessionJson,
         ),
         _secureStorage.write(
-          key: '${NestCoreConstants.sessionKey}_checksum',
+          key: _k('${NestCoreConstants.sessionKey}_checksum'),
           value: checksum,
         ),
         _secureStorage.write(
-          key: NestCoreConstants.accessTokenKey,
+          key: _k(NestCoreConstants.accessTokenKey),
           value: session.accessToken,
         ),
         _secureStorage.write(
-          key: NestCoreConstants.refreshTokenKey,
+          key: _k(NestCoreConstants.refreshTokenKey),
           value: session.refreshToken,
         ),
       ]);
@@ -171,7 +237,7 @@ class TokenManager {
   /// unrecoverable storage state).
   Future<Session?> getStoredSession() async {
     try {
-      final sessionJson = await _read(NestCoreConstants.sessionKey);
+      final sessionJson = await _read(_k(NestCoreConstants.sessionKey));
 
       if (sessionJson == null) return null;
 
@@ -179,7 +245,7 @@ class TokenManager {
       // tampering. Log a warning but continue so the server can validate the
       // refresh token via /auth/refresh. Wiping here would silently log users
       // out on any secure-storage write anomaly.
-      final storedChecksum = await _read('${NestCoreConstants.sessionKey}_checksum');
+      final storedChecksum = await _read(_k('${NestCoreConstants.sessionKey}_checksum'));
       if (storedChecksum != null) {
         final currentChecksum = _generateChecksum(sessionJson);
         if (storedChecksum != currentChecksum) {
@@ -242,7 +308,7 @@ class TokenManager {
         _cachedAccessToken = null;
       }
       // Fall through to secure storage — maybe a refresh already wrote a new one.
-      final token = await _read(NestCoreConstants.accessTokenKey);
+      final token = await _read(_k(NestCoreConstants.accessTokenKey));
       if (token != null && !isTokenExpired(token)) {
         _cachedAccessToken = token;
         return token;
@@ -255,7 +321,7 @@ class TokenManager {
         final refreshed = await refreshSession();
         if (refreshed) {
           final newToken = _cachedAccessToken ??
-              await _read(NestCoreConstants.accessTokenKey);
+              await _read(_k(NestCoreConstants.accessTokenKey));
           if (newToken != null && !isTokenExpired(newToken)) {
             _cachedAccessToken = newToken;
             return newToken;
@@ -280,7 +346,7 @@ class TokenManager {
         return _cachedRefreshToken;
       }
       // Otherwise read from secure storage and cache it
-      final token = await _read(NestCoreConstants.refreshTokenKey);
+      final token = await _read(_k(NestCoreConstants.refreshTokenKey));
       if (token != null) {
         _cachedRefreshToken = token;
       }
@@ -330,11 +396,15 @@ class TokenManager {
     try {
       // Let an in-flight legacy-key migration finish first so it cannot copy
       // the old session back after it is deleted below.
-      await (_legacyMigration ??= _migrateLegacyKeys());
+      await (_legacyMigration ??= _migrateAll());
+      // A shared-key session of THIS project (e.g. written by an older SDK
+      // after the move) must go too, or the next start would adopt it again.
+      final shared = _scoped ? await _secureStorage.read(key: NestCoreConstants.sessionKey) : null;
+      final dropShared = shared != null && _isThisProjectsSession(shared);
       await Future.wait([
-        _secureStorage.delete(key: NestCoreConstants.sessionKey),
-        _secureStorage.delete(key: NestCoreConstants.accessTokenKey),
-        _secureStorage.delete(key: NestCoreConstants.refreshTokenKey),
+        for (final base in _sessionBaseKeys) _secureStorage.delete(key: _k(base)),
+        if (dropShared)
+          for (final base in _sessionBaseKeys) _secureStorage.delete(key: base),
         // Pre-1.9.0 session keys too, or the next read would migrate the old
         // session back and sign the user in again.
         for (final key in _sessionKeys)

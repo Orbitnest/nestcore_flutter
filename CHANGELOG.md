@@ -1,3 +1,10 @@
+## [1.11.0]
+
+### Changed — sessions are stored per project (branches)
+- A NestCore project has a **Production** and a **Development** branch (`my_app` and `my_app__dev`). A dev build and a prod build of the same app on one device no longer overwrite each other's sign-in: the session keys are scoped to the project slug (`nestcore_session@my_app`).
+- **No sign-out on upgrade:** a session saved by an earlier version moves to the new keys the first time it is read, only for the project that issued it (the token's `aud` / `iss`). A Development build never picks up the Production session. Tokens without those claims (older servers) are kept as before.
+- Point a development build at the Development branch by giving it that branch's anon key (`NESTCORE_ANON_KEY`); the slug comes from the key.
+
 ## [1.10.0]
 
 ### Added — your own embeddings (NestCore Agent "Sync to NestCore")

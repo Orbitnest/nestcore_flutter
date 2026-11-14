@@ -1,6 +1,6 @@
 name: nestcore_flutter
 description: Official Flutter SDK for NestCore — auth (MFA, passkeys, SMS), Postgres queries, realtime, storage, and vector search for your backend.
-version: 1.10.0
+version: 1.11.0
 homepage: https://nestcore.io
 repository: https://github.com/Orbitnest/nestcore_flutter
 
