@@ -53,3 +53,6 @@ build/
 # Internal docs — never publish (PRD, implementation notes, security audits)
 docs/
 .vscode/
+
+# Local scratch output (e.g. dependency repro logs); never committed or published.
+/tmp/

@@ -18,6 +18,7 @@ import 'package:nestcore_flutter/src/auth/models/user.dart';
 import 'package:nestcore_flutter/src/auth/nestcore_auth.dart';
 import 'package:nestcore_flutter/src/auth/repositories/auth_repository.dart';
 import 'package:nestcore_flutter/src/auth/services/auth_service.dart';
+import 'package:nestcore_flutter/src/constants/error_codes.dart';
 import 'package:nestcore_flutter/src/auth/services/token_manager.dart';
 import 'package:nestcore_flutter/src/client/interceptors/auth_interceptor.dart';
 import 'package:nestcore_flutter/src/client/interceptors/error_interceptor.dart';
@@ -89,8 +90,10 @@ class _ErrHandler extends ErrorInterceptorHandler {
   DioException? passed;
   @override
   void next(DioException err) => passed = err;
+  // dio 5.10 added the optional [callFollowingErrorInterceptor]; declaring it
+  // keeps this a valid override on both older and newer dio.
   @override
-  void reject(DioException err) => passed = err;
+  void reject(DioException err, [bool callFollowingErrorInterceptor = false]) => passed = err;
 }
 
 DioException _unauthorized(String path) => DioException(
@@ -290,6 +293,39 @@ void main() {
     );
     expect((h.passed!.error as NestCoreException).message,
         'a should not exist, b must be a string');
+  });
+
+  test('ErrorInterceptor maps every DioExceptionType, incl. dio 5.10+ transformTimeout', () {
+    // Every value the resolved dio has; transformTimeout only exists from 5.10
+    // and is looked up by name so this test also compiles on older dio.
+    const expected = {
+      'connectionTimeout': ErrorCodes.connectionTimeout,
+      'sendTimeout': ErrorCodes.sendTimeout,
+      'receiveTimeout': ErrorCodes.receiveTimeout,
+      'badCertificate': ErrorCodes.badCertificate,
+      'badResponse': ErrorCodes.internalServerError, // 500 below
+      'cancel': ErrorCodes.requestCancelled,
+      'connectionError': ErrorCodes.connectionError,
+      'unknown': ErrorCodes.unknownError,
+      'transformTimeout': ErrorCodes.operationTimeout,
+    };
+    for (final type in DioExceptionType.values) {
+      final h = _ErrHandler();
+      ErrorInterceptor().onError(
+        DioException(
+          requestOptions: RequestOptions(path: '/x'),
+          type: type,
+          response: Response(requestOptions: RequestOptions(path: '/x'), statusCode: 500),
+        ),
+        h,
+      );
+      final ex = h.passed!.error as NestCoreException;
+      expect(ex.code, expected[type.name], reason: 'DioExceptionType.${type.name}');
+      expect(h.passed!.type, type);
+    }
+    final hasTransformTimeout = DioExceptionType.values.any((t) => t.name == 'transformTimeout');
+    // ignore: avoid_print
+    print('dio has transformTimeout: $hasTransformTimeout');
   });
 
   test('RetryInterceptor does not re-send a FormData body (B-31)', () async {

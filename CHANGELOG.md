@@ -1,3 +1,7 @@
+## [1.11.1]
+
+1.11.1: Support dio 5.11 (fixes a compile error: dio 5.10 added `DioExceptionType.transformTimeout`, which the error interceptor's exhaustive switch did not handle). No API changes.
+
 ## [1.11.0]
 
 ### Changed — sessions are stored per project (branches)

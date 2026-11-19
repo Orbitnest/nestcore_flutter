@@ -67,6 +67,24 @@ class ErrorInterceptor extends Interceptor {
           code: code,
         );
         break;
+      // dio 5.10 added DioExceptionType.transformTimeout (a response
+      // transformer ran past RequestOptions.transformTimeout). Matched by
+      // name so this still compiles against dio < 5.10, where the value
+      // doesn't exist and this branch is unreachable.
+      // ignore: unreachable_switch_default
+      default:
+        exception = err.type.name == 'transformTimeout'
+            ? const NestCoreException(
+                'Response processing timeout',
+                code: ErrorCodes.operationTimeout,
+              )
+            : NestCoreException(
+                err.message?.isNotEmpty == true
+                    ? 'Unknown error: ${err.message}'
+                    : 'Unknown error',
+                code: ErrorCodes.unknownError,
+              );
+        break;
     }
 
     handler.reject(
